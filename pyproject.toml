@@ -1,0 +1,35 @@
+[project]
+name = "kronos-predict"
+version = "0.1.0"
+description = "Predicción de precios con Kronos (foundation model de K-lines) + Yahoo Finance"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "numpy",
+    "pandas>=2.2,<2.4",
+    "torch>=2.2",
+    "einops==0.8.1",
+    "huggingface_hub>=0.33,<1.0",
+    "safetensors>=0.6",
+    "tqdm>=4.67",
+    "yfinance>=0.2.50",
+    "streamlit>=1.35",
+    "plotly>=5.20",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+# torch CPU-only: evita descargar varios GB de librerías CUDA
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
