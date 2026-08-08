@@ -1,7 +1,7 @@
-"""Descarga de series OHLCV desde Yahoo Finance y normalización al formato Kronos.
+"""OHLCV series download from Yahoo Finance, normalized to the Kronos format.
 
-Kronos espera un DataFrame con columnas ``open, high, low, close`` y
-opcionalmente ``volume`` y ``amount``, más una Serie de timestamps.
+Kronos expects a DataFrame with ``open, high, low, close`` columns and
+optionally ``volume`` and ``amount``, plus a Series of timestamps.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 import pandas as pd
 import yfinance as yf
 
-# Intervalos soportados (yfinance) -> frecuencia pandas equivalente
+# Supported intervals (yfinance) -> equivalent pandas frequency
 INTERVAL_FREQ: dict[str, str] = {
     "1m": "1min",
     "2m": "2min",
@@ -24,10 +24,10 @@ INTERVAL_FREQ: dict[str, str] = {
     "1wk": "7D",
 }
 
-# Periodos que ofrece yfinance
+# Periods offered by yfinance, ordered from shortest to longest duration
 VALID_PERIODS = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "max"]
 
-# Limitaciones conocidas de Yahoo: datos intradía con historia limitada
+# Known Yahoo limitations: intraday data has limited history
 MAX_PERIOD_BY_INTERVAL = {
     "1m": "5d",
     "2m": "1mo",
@@ -43,16 +43,16 @@ REQUIRED_COLUMNS = ["open", "high", "low", "close"]
 
 
 def download_ohlcv(ticker: str, interval: str = "1h", period: str = "1mo") -> pd.DataFrame:
-    """Descarga velas de Yahoo Finance y las normaliza al formato Kronos.
+    """Downloads candles from Yahoo Finance and normalizes them to Kronos format.
 
-    Devuelve un DataFrame con columnas
-    ``timestamps, open, high, low, close, volume, amount`` ordenado por
-    tiempo ascendente, sin NaNs y con timestamps tz-naive (UTC).
+    Returns a DataFrame with columns
+    ``timestamps, open, high, low, close, volume, amount`` sorted ascending
+    by time, without NaNs and with tz-naive timestamps (UTC).
     """
     if interval not in INTERVAL_FREQ:
         raise ValueError(
-            f"Intervalo no soportado: {interval!r}. "
-            f"Usa uno de: {sorted(INTERVAL_FREQ)}"
+            f"Unsupported interval: {interval!r}. "
+            f"Use one of: {sorted(INTERVAL_FREQ)}"
         )
 
     raw = yf.download(
@@ -64,22 +64,22 @@ def download_ohlcv(ticker: str, interval: str = "1h", period: str = "1mo") -> pd
     )
     if raw.empty:
         raise ValueError(
-            f"Yahoo Finance no devolvió datos para {ticker!r} "
+            f"Yahoo Finance returned no data for {ticker!r} "
             f"(interval={interval}, period={period}). "
-            "Comprueba el ticker o amplía el periodo."
+            "Check the ticker or widen the period."
         )
 
     df = _normalize(raw)
     if len(df) < 2:
-        raise ValueError(f"Datos insuficientes para {ticker!r}: {len(df)} velas.")
+        raise ValueError(f"Not enough data for {ticker!r}: {len(df)} candles.")
     return df
 
 
 def _normalize(raw: pd.DataFrame) -> pd.DataFrame:
-    """Normaliza el DataFrame crudo de yfinance al esquema Kronos."""
+    """Normalizes the raw yfinance DataFrame to the Kronos schema."""
     df = raw.copy()
 
-    # yfinance devuelve columnas MultiIndex si se descargan varios tickers
+    # yfinance returns MultiIndex columns when downloading several tickers
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
@@ -88,16 +88,16 @@ def _normalize(raw: pd.DataFrame) -> pd.DataFrame:
 
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
-        raise ValueError(f"Faltan columnas OHLC en los datos descargados: {missing}")
+        raise ValueError(f"Missing OHLC columns in downloaded data: {missing}")
 
     if "volume" not in df.columns:
         df["volume"] = 0.0
 
-    # amount = volumen * precio medio aproximado (Kronos lo usa como feature opcional)
+    # amount = volume * approximate mean price (Kronos uses it as an optional feature)
     if "amount" not in df.columns:
         df["amount"] = df["volume"] * (df["open"] + df["high"] + df["low"] + df["close"]) / 4.0
 
-    # Timestamps: índice tz-naive en UTC para evitar problemas con .dt y torch
+    # Timestamps: tz-naive UTC index to avoid issues with .dt and torch
     idx = pd.DatetimeIndex(df.index)
     if idx.tz is not None:
         idx = idx.tz_convert("UTC").tz_localize(None)

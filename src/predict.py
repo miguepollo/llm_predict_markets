@@ -1,4 +1,4 @@
-"""Lógica de predicción: forecast a futuro y backtest sobre datos históricos."""
+"""Prediction logic: forward forecast and backtest over historical data."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ OHLCV_COLUMNS = ["open", "high", "low", "close", "volume", "amount"]
 
 
 def future_timestamps(last_ts: pd.Timestamp, interval: str, n: int) -> pd.Series:
-    """Genera n timestamps futuros con la frecuencia del intervalo.
+    """Generates n future timestamps at the interval's frequency.
 
-    Nota: usa frecuencia fija de calendario. Para mercados 24/7 (cripto) es
-    exacto; para acciones con cierres (noches/fines de semana) los
-    timestamps son una aproximación, una limitación conocida del enfoque.
+    Note: uses a fixed calendar frequency. For 24/7 markets (crypto) it is
+    exact; for assets with trading halts (nights/weekends) the timestamps
+    are an approximation, a known limitation of this approach.
     """
     freq = INTERVAL_FREQ[interval]
     idx = pd.date_range(start=last_ts, periods=n + 1, freq=freq)[1:]
@@ -36,21 +36,21 @@ def forecast(
     sample_count: int = 1,
     verbose: bool = False,
 ) -> pd.DataFrame:
-    """Predice las próximas ``pred_len`` velas usando las últimas ``lookback``.
+    """Predicts the next ``pred_len`` candles from the last ``lookback`` ones.
 
-    ``df`` debe venir de :func:`src.data.download_ohlcv` (columnas
-    ``timestamps`` + OHLCV). Devuelve el DataFrame de predicción indexado
-    por los timestamps futuros.
+    ``df`` must come from :func:`src.data.download_ohlcv` (``timestamps``
+    + OHLCV columns). Returns the prediction DataFrame indexed by the
+    future timestamps.
     """
     if lookback > predictor.max_context:
         raise ValueError(
-            f"lookback ({lookback}) supera el contexto máximo del modelo "
+            f"lookback ({lookback}) exceeds the model's maximum context "
             f"({predictor.max_context})."
         )
     if len(df) < lookback:
         raise ValueError(
-            f"Datos insuficientes: {len(df)} velas disponibles, "
-            f"se necesitan {lookback} para el lookback."
+            f"Not enough data: {len(df)} candles available, "
+            f"{lookback} needed for the lookback."
         )
 
     hist = df.iloc[-lookback:].reset_index(drop=True)
@@ -81,18 +81,18 @@ def backtest(
     sample_count: int = 1,
     verbose: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Predice una ventana histórica conocida para comparar con la realidad.
+    """Predicts a known historical window to compare against reality.
 
-    Usa las velas ``[-lookback-pred_len : -pred_len]`` como contexto y
-    predice las últimas ``pred_len`` velas, que se devuelven junto a las
-    velas reales para evaluación.
+    Uses the candles ``[-lookback-pred_len : -pred_len]`` as context and
+    predicts the last ``pred_len`` candles, returned together with the
+    real ones for evaluation.
 
-    Devuelve ``(pred_df, actual_df)`` con índices alineados por timestamp.
+    Returns ``(pred_df, actual_df)`` with indexes aligned by timestamp.
     """
     if len(df) < lookback + pred_len:
         raise ValueError(
-            f"Datos insuficientes para backtest: {len(df)} velas, se "
-            f"necesitan lookback+pred_len = {lookback + pred_len}."
+            f"Not enough data for backtest: {len(df)} candles, "
+            f"lookback+pred_len = {lookback + pred_len} needed."
         )
 
     context_end = len(df) - pred_len

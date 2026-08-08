@@ -1,13 +1,13 @@
-"""Registro de modelos Kronos y carga del predictor.
+"""Kronos model registry and predictor loading.
 
-Kronos no tiene paquete oficial en PyPI, así que se vendoriza el repo en
-``vendor/Kronos`` y se importa desde ahí. Modelos disponibles en
+Kronos has no official PyPI package, so the repo is vendored under
+``vendor/Kronos`` and imported from there. Models available on
 HuggingFace (https://huggingface.co/NeoQuasar):
 
-- mini : 4.1M params, contexto 2048, tokenizer 2k   -> ideal para CPU
-- small: 24.7M params, contexto 512                 -> equilibrio (default)
-- base : 102.3M params, contexto 512                -> mejor calidad, lento en CPU
-- large: 499.2M params, NO publicado
+- mini : 4.1M params, context 2048, 2k tokenizer   -> ideal for CPU
+- small: 24.7M params, context 512                 -> balanced (default)
+- base : 102.3M params, context 512                -> best quality, slow on CPU
+- large: 499.2M params, NOT published
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         hf_tokenizer_id="NeoQuasar/Kronos-Tokenizer-2k",
         max_context=2048,
         params="4.1M",
-        description="Ligero y rápido, ideal para CPU. Contexto largo (2048).",
+        description="Lightweight and fast, ideal for CPU. Long context (2048).",
     ),
     "small": ModelConfig(
         name="small",
@@ -45,7 +45,7 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         hf_tokenizer_id="NeoQuasar/Kronos-Tokenizer-base",
         max_context=512,
         params="24.7M",
-        description="Equilibrio calidad/velocidad. Recomendado por defecto.",
+        description="Quality/speed balance. Recommended default.",
     ),
     "base": ModelConfig(
         name="base",
@@ -53,7 +53,7 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         hf_tokenizer_id="NeoQuasar/Kronos-Tokenizer-base",
         max_context=512,
         params="102.3M",
-        description="Mayor calidad disponible, pero lento en CPU.",
+        description="Best available quality, but slow on CPU.",
     ),
 }
 
@@ -61,12 +61,12 @@ DEFAULT_MODEL = "small"
 
 
 def _ensure_kronos_importable() -> None:
-    """Añade vendor/Kronos a sys.path para poder hacer `from model import ...`."""
+    """Adds vendor/Kronos to sys.path so `from model import ...` works."""
     path = str(VENDOR_KRONOS_PATH)
     if not VENDOR_KRONOS_PATH.is_dir():
         raise FileNotFoundError(
-            f"No se encuentra el repo vendorizado de Kronos en {VENDOR_KRONOS_PATH}. "
-            "Clónalo con: git clone https://github.com/shiyu-coder/Kronos vendor/Kronos"
+            f"Vendored Kronos repo not found at {VENDOR_KRONOS_PATH}. "
+            "Clone it with: git clone https://github.com/shiyu-coder/Kronos vendor/Kronos"
         )
     if path not in sys.path:
         sys.path.insert(0, path)
@@ -74,15 +74,15 @@ def _ensure_kronos_importable() -> None:
 
 @lru_cache(maxsize=3)
 def load_predictor(model_name: str = DEFAULT_MODEL, device: str = "cpu"):
-    """Carga (cacheada) tokenizer + modelo y devuelve un KronosPredictor.
+    """Loads (cached) tokenizer + model and returns a KronosPredictor.
 
-    La primera llamada descarga los pesos desde HuggingFace (~10-400 MB
-    según el modelo). Las llamadas posteriores reutilizan la instancia.
+    The first call downloads the weights from HuggingFace (~10-400 MB
+    depending on the model). Subsequent calls reuse the instance.
     """
     if model_name not in MODEL_REGISTRY:
         raise ValueError(
-            f"Modelo desconocido: {model_name!r}. "
-            f"Disponibles: {sorted(MODEL_REGISTRY)}"
+            f"Unknown model: {model_name!r}. "
+            f"Available: {sorted(MODEL_REGISTRY)}"
         )
     cfg = MODEL_REGISTRY[model_name]
 
@@ -97,5 +97,5 @@ def load_predictor(model_name: str = DEFAULT_MODEL, device: str = "cpu"):
         device=device,
         max_context=cfg.max_context,
     )
-    predictor.eval = getattr(model, "eval", lambda: None)  # asegurar modo eval
+    predictor.eval = getattr(model, "eval", lambda: None)  # ensure eval mode
     return predictor

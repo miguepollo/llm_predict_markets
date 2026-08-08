@@ -1,4 +1,4 @@
-"""Métricas de evaluación para el modo backtest."""
+"""Evaluation metrics for backtest mode."""
 
 from __future__ import annotations
 
@@ -11,19 +11,19 @@ def compute_metrics(
     pred_close: pd.Series,
     prev_close: float | None = None,
 ) -> dict[str, float]:
-    """Calcula métricas de error y acierto direccional sobre el precio de cierre.
+    """Computes error metrics and directional accuracy on the close price.
 
-    - MAE / RMSE / MAPE: error sobre el valor de cierre.
-    - directional_accuracy: % de pasos en los que el signo del cambio
-      predicho coincide con el real. Si se pasa ``prev_close`` (último
-      cierre del contexto), el primer paso también se evalúa.
+    - MAE / RMSE / MAPE: error on the close value.
+    - directional_accuracy: % of steps where the sign of the predicted
+      change matches the real one. If ``prev_close`` (last close of the
+      context) is given, the first step is evaluated too.
     """
     actual = np.asarray(actual_close, dtype=float)
     pred = np.asarray(pred_close, dtype=float)
     if actual.shape != pred.shape:
-        raise ValueError("actual y pred deben tener la misma longitud.")
+        raise ValueError("actual and pred must have the same length.")
     if len(actual) == 0:
-        raise ValueError("Series vacías.")
+        raise ValueError("Empty series.")
 
     err = pred - actual
     mae = float(np.mean(np.abs(err)))
@@ -32,7 +32,7 @@ def compute_metrics(
     nonzero = actual != 0
     mape = float(np.mean(np.abs(err[nonzero] / actual[nonzero])) * 100) if nonzero.any() else float("nan")
 
-    # Acierto direccional: signo del cambio respecto al paso anterior
+    # Directional accuracy: sign of the change vs. the previous step
     if prev_close is not None:
         actual_with_prev = np.concatenate([[prev_close], actual])
         pred_with_prev = np.concatenate([[prev_close], pred])
@@ -41,11 +41,7 @@ def compute_metrics(
         pred_with_prev = pred
     actual_dir = np.sign(np.diff(actual_with_prev))
     pred_dir = np.sign(np.diff(pred_with_prev))
-    if prev_close is None:
-        # Sin prev_close el primer paso no tiene dirección definida
-        directional_accuracy = float(np.mean(actual_dir == pred_dir) * 100) if len(actual_dir) else float("nan")
-    else:
-        directional_accuracy = float(np.mean(actual_dir == pred_dir) * 100)
+    directional_accuracy = float(np.mean(actual_dir == pred_dir) * 100) if len(actual_dir) else float("nan")
 
     return {
         "mae": mae,

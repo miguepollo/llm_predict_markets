@@ -24,7 +24,7 @@ def test_known_errors():
 
 
 def test_directional_accuracy():
-    # Real: sube, baja, sube. Predicho: sube, sube, sube -> 2/3
+    # Actual: up, down, up. Predicted: up, up, up -> 2/3
     actual = pd.Series([1.0, 2.0, 1.5, 2.5])
     pred = pd.Series([1.0, 2.0, 2.2, 2.6])
     m = compute_metrics(actual, pred)
@@ -32,7 +32,7 @@ def test_directional_accuracy():
 
 
 def test_directional_with_prev_close():
-    # Con prev_close el primer paso cuenta: real baja (1.0 < 2.0), pred sube
+    # With prev_close the first step counts: actual goes down (1.0 < 2.0), pred goes up
     actual = pd.Series([1.0, 2.0])
     pred = pd.Series([3.0, 4.0])
     m = compute_metrics(actual, pred, prev_close=2.0)

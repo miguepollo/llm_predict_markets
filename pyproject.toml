@@ -1,7 +1,7 @@
 [project]
 name = "kronos-predict"
 version = "0.1.0"
-description = "Predicción de precios con Kronos (foundation model de K-lines) + Yahoo Finance"
+description = "Price prediction with Kronos (financial K-line foundation model) + Yahoo Finance"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "numpy",
@@ -25,7 +25,7 @@ dev = [
 pythonpath = ["."]
 testpaths = ["tests"]
 
-# torch CPU-only: evita descargar varios GB de librerías CUDA
+# CPU-only torch: avoids downloading several GB of CUDA libraries
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"

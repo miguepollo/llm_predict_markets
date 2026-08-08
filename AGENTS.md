@@ -1,41 +1,41 @@
 # AGENTS.md
 
-## Contexto
+## Context
 
-App local de predicción de precios: **Kronos** (foundation model open-source de
-K-lines financieras, vendorizado en `vendor/Kronos`) + **Yahoo Finance**
-(yfinance) + **Streamlit** + **Plotly**. Solo investigación, no trading real.
+Local price prediction app: **Kronos** (open-source foundation model for
+financial K-lines, vendored in `vendor/Kronos`) + **Yahoo Finance**
+(yfinance) + **Streamlit** + **Plotly**. Research only, no real trading.
 
-## Entorno y comandos
+## Environment and commands
 
-- Gestor de paquetes: **uv** con **Python 3.11** (el sistema tiene 3.14; torch
-  va por índice CPU-only definido en `pyproject.toml`).
-- Instalar: `uv sync --python 3.11`
-- Ejecutar app: `uv run streamlit run app.py`
-- Tests: `uv run pytest` (unitarios, sin red ni modelo; ~1s)
+- Package manager: **uv** with **Python 3.11** (the system has 3.14; torch
+  comes from the CPU-only index defined in `pyproject.toml`).
+- Install: `uv sync --python 3.11`
+- Run the app: `uv run streamlit run app.py`
+- Tests: `uv run pytest` (unit tests, no network or model needed; ~1s)
 
-## Decisiones de diseño
+## Design decisions
 
-- **Kronos se vendoriza** en `vendor/Kronos` (no hay paquete oficial en PyPI;
-  el paquete `kronos` de PyPI es un cron de Django sin relación). Commit
-  pineado: `67b630e67f6a18c9e9be918d9b4337c960db1e9a`. Se importa vía
-  `sys.path` en `src/models.py`.
-- **Modelos** (`src/models.py`, `MODEL_REGISTRY`): `mini` (4.1M, ctx 2048,
-  tokenizer `Kronos-Tokenizer-2k`), `small` (24.7M, ctx 512, default) y
-  `base` (102.3M, ctx 512) con tokenizers `NeoQuasar/*` de HuggingFace.
-  `Kronos-large` no está publicado.
-- **Sin GPU**: todo corre en CPU. `base` es lento; ofrecerlo pero avisar.
-- **Formato de datos**: `src/data.py` normaliza yfinance a
-  `timestamps, open, high, low, close, volume, amount` (tz-naive UTC, sin
-  NaN). `amount = volume * precio medio` si falta. Kronos exige columnas
-  lowercase OHLC + rellena volume/amount si faltan.
-- **Timestamps futuros**: frecuencia fija por intervalo (`INTERVAL_FREQ` en
-  `src/data.py`). Aproximación documentada para mercados con cierres.
-- **Cachés de Streamlit**: `@st.cache_resource` para el predictor (pesos HF),
-  `@st.cache_data(ttl=900)` para las descargas.
+- **Kronos is vendored** in `vendor/Kronos` (no official PyPI package;
+  the `kronos` package on PyPI is an unrelated Django cron app). Pinned
+  commit: `67b630e67f6a18c9e9be918d9b4337c960db1e9a`. Imported via
+  `sys.path` in `src/models.py`.
+- **Models** (`src/models.py`, `MODEL_REGISTRY`): `mini` (4.1M, ctx 2048,
+  tokenizer `Kronos-Tokenizer-2k`), `small` (24.7M, ctx 512, default) and
+  `base` (102.3M, ctx 512) with `NeoQuasar/*` tokenizers from HuggingFace.
+  `Kronos-large` is not published.
+- **No GPU**: everything runs on CPU. `base` is slow; offer it with a warning.
+- **Data format**: `src/data.py` normalizes yfinance to
+  `timestamps, open, high, low, close, volume, amount` (tz-naive UTC, no
+  NaN). `amount = volume * mean price` if missing. Kronos requires lowercase
+  OHLC columns and fills volume/amount if missing.
+- **Future timestamps**: fixed frequency per interval (`INTERVAL_FREQ` in
+  `src/data.py`). Documented approximation for markets with trading halts.
+- **Streamlit caches**: `@st.cache_resource` for the predictor (HF weights),
+  `@st.cache_data(ttl=900)` for downloads.
 
-## Estilo
+## Style
 
-- Código y comentarios en español, simple y modular (src/ por capas).
-- No añadir dependencias pesadas sin motivo; matplotlib no se usa (Plotly).
-- Al cambiar interfaz de `src/`, actualizar `app.py`, tests y este archivo.
+- Code and comments in English, simple and modular (src/ by layers).
+- Do not add heavy dependencies without a reason; matplotlib is not used (Plotly).
+- When changing the `src/` interface, update `app.py`, tests and this file.

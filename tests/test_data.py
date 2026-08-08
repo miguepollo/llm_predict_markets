@@ -27,7 +27,7 @@ def test_normalize_basic():
     assert len(df) == 10
     # timestamps tz-naive
     assert df["timestamps"].dt.tz is None
-    # amount = volume * precio medio
+    # amount = volume * mean price
     expected = df["volume"] * (df["open"] + df["high"] + df["low"] + df["close"]) / 4.0
     pd.testing.assert_series_equal(df["amount"], expected, check_names=False)
 
@@ -41,7 +41,7 @@ def test_normalize_without_volume():
 def test_normalize_drops_nan_and_sorts():
     raw = _make_raw()
     raw.iloc[3, 0] = np.nan  # Open NaN
-    raw = raw.iloc[::-1]     # desordenado
+    raw = raw.iloc[::-1]     # reversed order
     df = _normalize(raw)
     assert len(df) == 9
     assert df["timestamps"].is_monotonic_increasing
@@ -56,7 +56,7 @@ def test_normalize_multiindex_columns():
 
 def test_normalize_missing_ohlc_raises():
     raw = _make_raw().drop(columns=["High"])
-    with pytest.raises(ValueError, match="Faltan columnas"):
+    with pytest.raises(ValueError, match="Missing OHLC columns"):
         _normalize(raw)
 
 

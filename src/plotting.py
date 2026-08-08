@@ -1,4 +1,4 @@
-"""Gráficos de velas con Plotly: histórico, predicción y comparación backtest."""
+"""Candlestick charts with Plotly: history, prediction and backtest comparison."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def _add_volume(fig: go.Figure, df: pd.DataFrame, name: str, color: str, row: in
 
 
 def _to_indexed(df: pd.DataFrame) -> pd.DataFrame:
-    """Asegura que el DataFrame está indexado por timestamps."""
+    """Ensures the DataFrame is indexed by timestamps."""
     out = df.copy()
     if "timestamps" in out.columns:
         out.index = pd.DatetimeIndex(out["timestamps"])
@@ -56,18 +56,18 @@ def _to_indexed(df: pd.DataFrame) -> pd.DataFrame:
 
 def forecast_figure(hist_df: pd.DataFrame, pred_df: pd.DataFrame,
                     title: str = "Forecast") -> go.Figure:
-    """Velas históricas + velas predichas (en rojo)."""
+    """Historical candles + predicted candles (in red)."""
     hist = _to_indexed(hist_df)
     pred = _to_indexed(pred_df)
 
     fig = make_subplots(
         rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03,
-        row_heights=[0.75, 0.25], subplot_titles=(title, "Volumen"),
+        row_heights=[0.75, 0.25], subplot_titles=(title, "Volume"),
     )
-    _add_candlestick(fig, hist, "Histórico", row=1)
-    _add_candlestick(fig, pred, "Predicción", row=1, increasing_color=COLOR_PRED)
-    _add_volume(fig, hist, "Vol. histórico", COLOR_HIST, row=2)
-    _add_volume(fig, pred, "Vol. predicho", COLOR_PRED, row=2)
+    _add_candlestick(fig, hist, "History", row=1)
+    _add_candlestick(fig, pred, "Prediction", row=1, increasing_color=COLOR_PRED)
+    _add_volume(fig, hist, "Hist. volume", COLOR_HIST, row=2)
+    _add_volume(fig, pred, "Pred. volume", COLOR_PRED, row=2)
 
     fig.update_layout(
         height=700, xaxis_rangeslider_visible=False,
@@ -79,21 +79,21 @@ def forecast_figure(hist_df: pd.DataFrame, pred_df: pd.DataFrame,
 
 def backtest_figure(context_df: pd.DataFrame, actual_df: pd.DataFrame,
                     pred_df: pd.DataFrame, title: str = "Backtest") -> go.Figure:
-    """Contexto + realidad (verde) vs predicción (rojo)."""
+    """Context + reality (green) vs prediction (red)."""
     context = _to_indexed(context_df)
     actual = _to_indexed(actual_df)
     pred = _to_indexed(pred_df)
 
     fig = make_subplots(
         rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03,
-        row_heights=[0.75, 0.25], subplot_titles=(title, "Volumen"),
+        row_heights=[0.75, 0.25], subplot_titles=(title, "Volume"),
     )
-    _add_candlestick(fig, context, "Contexto", row=1)
-    _add_candlestick(fig, actual, "Real", row=1, increasing_color=COLOR_REAL)
-    _add_candlestick(fig, pred, "Predicción", row=1, increasing_color=COLOR_PRED)
-    _add_volume(fig, context, "Vol. contexto", COLOR_HIST, row=2)
-    _add_volume(fig, actual, "Vol. real", COLOR_REAL, row=2)
-    _add_volume(fig, pred, "Vol. predicho", COLOR_PRED, row=2)
+    _add_candlestick(fig, context, "Context", row=1)
+    _add_candlestick(fig, actual, "Actual", row=1, increasing_color=COLOR_REAL)
+    _add_candlestick(fig, pred, "Prediction", row=1, increasing_color=COLOR_PRED)
+    _add_volume(fig, context, "Context volume", COLOR_HIST, row=2)
+    _add_volume(fig, actual, "Actual volume", COLOR_REAL, row=2)
+    _add_volume(fig, pred, "Pred. volume", COLOR_PRED, row=2)
 
     fig.update_layout(
         height=700, xaxis_rangeslider_visible=False,
