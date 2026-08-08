@@ -74,7 +74,8 @@ with st.sidebar:
     st.header("Sampling")
     temperature = st.slider("Temperature (T)", 0.1, 2.0, 1.0, step=0.1)
     top_p = st.slider("Top-p", 0.1, 1.0, 0.9, step=0.05)
-    sample_count = st.slider("Sample count", 1, 5, 1)
+    sample_count = st.slider("Sample count", 1, 20, 1,
+                             help="Forecast paths generated and averaged. More samples = smoother prediction, but proportionally slower.")
 
     run = st.button("🚀 Predict", type="primary", width="stretch")
 

@@ -68,7 +68,7 @@ distribution. These parameters control the sampling process:
 |---|---|
 | **Temperature (T)** | Randomness of the sampling (0.1–2.0). Lower = more conservative, closer to the most likely path. Higher = more diverse and volatile paths. Values around 1.0 are a good default. |
 | **Top-p** | Nucleus sampling threshold (0.1–1.0). Only tokens within the top cumulative probability `p` are considered. Lower = safer, less diverse predictions; 0.9 is a good default. |
-| **Sample count** | Number of independent forecast paths generated and averaged into the final prediction (1–5). More samples = smoother, more stable results, at linear CPU cost. |
+| **Sample count** | Number of independent forecast paths generated and averaged into the final prediction (1–20). More samples = smoother, more stable results, at linear CPU cost (20 samples ≈ 20× the compute of a single one). |
 
 ## Tests
 
