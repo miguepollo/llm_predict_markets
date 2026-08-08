@@ -5,6 +5,8 @@ Run with:  uv run streamlit run app.py
 
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
 import streamlit as st
 
@@ -15,9 +17,21 @@ from src.data import (
     VALID_PERIODS,
     download_ohlcv,
 )
-from src.models import DEFAULT_MODEL, MODEL_REGISTRY, load_predictor
+from src.models import (
+    DEFAULT_MODEL,
+    MODEL_REGISTRY,
+    available_devices,
+    device_details,
+    load_predictor,
+)
 from src.plotting import backtest_figure, forecast_figure
 from src.predict import backtest, forecast
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Kronos Price Predictor", layout="wide")
 st.title("📈 Kronos Price Predictor")
@@ -29,13 +43,24 @@ st.caption(
 
 
 @st.cache_resource(show_spinner=False)
-def get_predictor(model_name: str):
-    return load_predictor(model_name, device="cpu")
+def get_predictor(model_name: str, device: str):
+    return load_predictor(model_name, device=device)
 
 
 @st.cache_data(ttl=900, show_spinner=False)
 def get_data(ticker: str, interval: str, period: str) -> pd.DataFrame:
     return download_ohlcv(ticker, interval, period)
+
+
+@st.cache_resource(show_spinner=False)
+def get_available_devices() -> list[str]:
+    """Detected once per server process so startup logs do not repeat."""
+    devices = available_devices()
+    logger.info(
+        "Compute devices detected: %s",
+        {d: device_details(d) for d in devices},
+    )
+    return devices
 
 
 # ---------------------------------------------------------------- sidebar ---
@@ -60,6 +85,14 @@ with st.sidebar:
     )
     cfg = MODEL_REGISTRY[model_name]
     st.caption(cfg.description)
+
+    devices = get_available_devices()
+    device = st.selectbox(
+        "Compute device", devices, index=0,
+        format_func=device_details,
+        help="'xpu' is Intel GPU (Arc/Iris Xe) and requires a torch XPU build "
+             "(see README). If unsure, use cpu.",
+    )
 
     mode = st.radio("Mode", ["Forecast", "Backtest"], horizontal=True)
 
@@ -108,8 +141,9 @@ if not run:
     st.stop()
 
 with st.spinner(f"Loading Kronos-{model_name} model (first run downloads from HuggingFace)…"):
+    logger.info("Predictor requested: model=%s device=%s", model_name, device)
     try:
-        predictor = get_predictor(model_name)
+        predictor = get_predictor(model_name, device)
     except Exception as e:
         st.error(f"Error loading the model: {e}")
         st.stop()

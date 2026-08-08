@@ -24,7 +24,15 @@ financial K-lines, vendored in `vendor/Kronos`) + **Yahoo Finance**
   tokenizer `Kronos-Tokenizer-2k`), `small` (24.7M, ctx 512, default) and
   `base` (102.3M, ctx 512) with `NeoQuasar/*` tokenizers from HuggingFace.
   `Kronos-large` is not published.
-- **No GPU**: everything runs on CPU. `base` is slow; offer it with a warning.
+- **Devices**: CPU by default. The sidebar device selector is auto-detected
+  via `available_devices()` in `src/models.py` (cpu/cuda/xpu/mps) and passed
+  explicitly to `KronosPredictor` (its own auto-detection ignores XPU).
+  Intel GPU needs the torch XPU build; Intel NPU is not supported (would
+  require OpenVINO export + custom generation loop). See README
+  "Hardware acceleration".
+- **Logging**: `logging` INFO messages at startup/model init (`src/models.py`,
+  `app.py`) report the torch build, the selected device and driver details
+  (`device_details()`).
 - **Data format**: `src/data.py` normalizes yfinance to
   `timestamps, open, high, low, close, volume, amount` (tz-naive UTC, no
   NaN). `amount = volume * mean price` if missing. Kronos requires lowercase
