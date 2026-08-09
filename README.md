@@ -93,9 +93,68 @@ The app picks the compute device from the sidebar ("Compute device"). The list
 is auto-detected from torch and limited to `cpu` and `cuda`, because the models'
 torch inference only runs natively on those.
 
-- To use CUDA, install a CUDA-enabled torch build instead of the default CPU one
-  (e.g. change the `pytorch-cpu` index in `pyproject.toml` to a CUDA wheel) and
-  re-run `uv sync`.
+By default `pyproject.toml` pins a **CPU-only** torch build:
+
+```toml
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+```
+
+To accelerate inference on an **NVIDIA GPU**, replace that CPU wheel with a CUDA
+build. Pick **one** of the two options below, then re-verify:
+
+```bash
+uv run python -c "import torch; print(torch.version.cuda, torch.cuda.is_available())"
+```
+
+You should see your CUDA version (e.g. `cu124`) and `True`.
+
+### Option A — persistent (recommended)
+
+Change the `url` in `pyproject.toml` to the CUDA wheel index. Choose the CUDA
+version that matches your driver (see `nvidia-smi`); `cu124` is a safe default
+for recent NVIDIA drivers and works with the torch `<2.5` pin used here:
+
+```toml
+# Instead of https://download.pytorch.org/whl/cpu
+url = "https://download.pytorch.org/whl/cu124"
+```
+
+Then recreate the environment (this recompiles torch):
+
+```bash
+uv sync --python 3.11 --reinstall-package torch
+```
+
+### Option B — one-off (no file changes)
+
+Install just torch from the CUDA index with `uv pip install`:
+
+```bash
+uv pip install --python 3.11 torch --index-url https://download.pytorch.org/whl/cu124
+```
+
+> **Note:** this only swaps the current environment; the next `uv sync` will
+> restore the CPU-only build defined in `pyproject.toml` unless you also apply
+> Option A (or `uv sync` again with `--reinstall-package torch`).
+
+### Which CUDA wheel to pick
+
+| PyTorch wheel | Min. NVIDIA driver (Windows) | Notes |
+|---|---|---|
+| `cu118` | ~450.80 | oldest; for old drivers |
+| `cu121` | ~525.60 | |
+| `cu124` | ~550.54 | recommended default |
+
+Your concrete CUDA architecture/driver is shown by `nvidia-smi`. Both models
+(TimesFM and Moirai) then run inference on the GPU and the sidebar will offer
+`cuda`.
+
 - Intel GPU (XPU), MPS and Intel NPU are **not** used by these models.
 
 ## Tests
