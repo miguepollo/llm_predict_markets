@@ -1,7 +1,7 @@
 [project]
 name = "timesfm-predict"
 version = "0.3.0"
-description = "Price prediction with TimesFM and Moirai (time-series foundation models) + Yahoo Finance"
+description = "Price prediction with TimesFM, Moirai and Kronos (time-series foundation models) + Yahoo Finance"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "numpy",

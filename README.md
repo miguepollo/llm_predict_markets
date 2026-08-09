@@ -1,19 +1,22 @@
-# TimesFM & Moirai Price Predictor
+# TimesFM · Moirai · Kronos Price Predictor
 
 Local price prediction app (OHLCV candles) using Google's
-[**TimesFM**](https://github.com/google-research/timesfm) (Apache-2.0) or
+[**TimesFM**](https://github.com/google-research/timesfm) (Apache-2.0),
 Salesforce's [**Moirai**](https://github.com/SalesforceAIResearch/uni2ts)
-(CC-BY-NC-4.0) plus **Yahoo Finance** data. For research purposes only —
+(CC-BY-NC-4.0) or [**Kronos**](https://github.com/shiyu-coder/Kronos)
+(Apache-2.0) plus **Yahoo Finance** data. For research purposes only —
 **not financial advice**.
 
 ## Features
 
 - Downloads OHLCV series from Yahoo Finance by **ticker** and **timeframe**
   (1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk).
-- **Two interchangeable foundation models** (sidebar):
+- **Three interchangeable foundation models** (sidebar):
   - **TimesFM 2.5** — `200M` params, point forecast, Apache-2.0.
   - **Moirai 1.1-R** — `small`/`base`/`large` (14M/91M/311M), probabilistic and
     truly **multivariate** (forecasts all OHLCV variates together).
+  - **Kronos** — `mini`/`small`/`base` (4.1M/24.7M/102.3M), **generative** with
+    sampling controls (temperature, top-p, sample count), Apache-2.0.
 - **Forecast mode**: predicts the next N candles from recent context.
 - **Backtest mode**: predicts a known historical window and compares it against
   reality (MAE, RMSE, MAPE, directional accuracy, actual vs predicted chart).
@@ -23,8 +26,8 @@ Salesforce's [**Moirai**](https://github.com/SalesforceAIResearch/uni2ts)
 
 ## How prediction works
 
-Both models feed the five OHLCV series (**open, high, low, close, volume**) and
-return a forecast for each candle:
+All three models feed the five OHLCV series (**open, high, low, close, volume**)
+and return a forecast for each candle:
 
 - **TimesFM** is a univariate point-forecast model; its `forecast()` accepts
   several series in one batched call, so the five series are forecast
@@ -33,6 +36,10 @@ return a forecast for each candle:
   variates **jointly** (one series with `target_dim = 5`), so cross-series
   correlation is modeled. The median over sampled trajectories is used as the
   point forecast.
+- **Kronos** is a generative token-based model (vendored under `vendor/Kronos`).
+  It samples candle sequences from the next-token distribution — controlled by
+  **temperature**, **top-p** and **sample count** — and averages the sampled
+  paths into the point forecast.
 
 Either way each predicted candle is reconciled so the geometry is consistent:
 `high = max(hi, open, close)`, `low = min(lo, open, close)`, and
@@ -42,10 +49,13 @@ Either way each predicted candle is reconciled so the geometry is consistent:
 
 Requires [uv](https://docs.astral.sh/uv/) (manages Python 3.11 automatically).
 Installation also pulls in `uni2ts` (Moirai), which pins **torch <2.5**, numpy
-1.26 and einops 0.7; this is shared with TimesFM.
+1.26 and einops 0.7; this is shared with the other backends.
 
 ```bash
 uv sync --python 3.11   # CPU-only torch + timesfm + uni2ts from PyPI
+
+# Kronos has no PyPI package; clone it once into vendor/ (gitignored):
+git clone https://github.com/shiyu-coder/Kronos vendor/Kronos
 ```
 
 ## Usage
@@ -81,11 +91,14 @@ All parameters are set in the sidebar:
 
 | Parameter | What it does |
 |---|---|
-| **Foundation model** | `TimesFM-2.5` (point forecast), `Moirai small/base/large` (probabilistic + true multivariate). Default: `moirai-base`. |
-| **Compute device** | `cpu` or `cuda`. Both models only accelerate on CUDA; XPU/MPS fall back to CPU. |
+| **Foundation model** | `TimesFM-2.5` (point forecast), `Moirai small/base/large` (probabilistic + true multivariate) or `Kronos mini/small/base` (generative). Default: `moirai-base`. |
+| **Compute device** | `cpu` or `cuda`. TimesFM/Moirai only accelerate on CUDA; XPU/MPS fall back to CPU (Kronos can use them). |
 | **Mode** | `Forecast`: predicts the next N candles into the future. `Backtest`: predicts a known historical window and compares it against reality with metrics (MAE, RMSE, MAPE, directional accuracy) — use this to judge whether the model works for your ticker/timeframe before trusting a forecast. |
-| **Lookback** | Number of past candles fed as context (multiples of 32; up to 1024 for TimesFM, 512 for Moirai). More context = more information, but slower. |
+| **Lookback** | Number of past candles fed as context (multiples of 32; up to 1024 for TimesFM, 512 for Moirai, 2048 for Kronos-mini). More context = more information, but slower. |
 | **Candles to predict / Backtest candles** | Prediction horizon (`pred_len`, max 240): how many candles the model generates. Longer horizons are slower and less reliable. |
+| **Temperature (T)** | *(Kronos only)* Sampling temperature: `1.0` is neutral, lower = more conservative, higher = more varied paths. |
+| **Top-p** | *(Kronos only)* Nucleus sampling threshold: probability mass kept at each token step. |
+| **Sample count** | *(Kronos only)* Forecast paths generated and averaged. More samples = smoother prediction, proportionally slower. |
 
 ## Hardware acceleration
 
@@ -151,11 +164,9 @@ uv pip install --python 3.11 torch --index-url https://download.pytorch.org/whl/
 | `cu121` | ~525.60 | |
 | `cu124` | ~550.54 | recommended default |
 
-Your concrete CUDA architecture/driver is shown by `nvidia-smi`. Both models
-(TimesFM and Moirai) then run inference on the GPU and the sidebar will offer
-`cuda`.
-
-- Intel GPU (XPU), MPS and Intel NPU are **not** used by these models.
+Your concrete CUDA architecture/driver is shown by `nvidia-smi`. TimesFM and
+Moirai then run inference on the GPU and the sidebar will offer `cuda` (Kronos
+can also use Intel GPU / Apple Silicon, if torch is built for those).
 
 ## Tests
 
@@ -169,10 +180,11 @@ uv run pytest
 app.py              # Streamlit UI
 src/
   data.py           # yfinance -> normalized OHLCV DataFrame
-  models.py         # registry (timesfm + moirai), caching, predictors
+  models.py         # registry (timesfm + moirai + kronos), caching, predictors
   predict.py        # forecast and backtest on top of a predictor
   backtest.py       # metrics: MAE/RMSE/MAPE/directional accuracy
   plotting.py       # Plotly candlestick charts
+vendor/Kronos       # vendored Kronos repo (gitignored, clone manually)
 tests/              # unit tests (no network, no model)
 ```
 
@@ -180,11 +192,11 @@ tests/              # unit tests (no network, no model)
 
 - **No model predicts the market reliably**; backtests are meant to assess
   forecast quality for each specific ticker/timeframe.
-- Moirai weights are licensed **CC-BY-NC-4.0** (non-commercial); TimesFM is
-  Apache-2.0.
+- Moirai weights are licensed **CC-BY-NC-4.0** (non-commercial); TimesFM and
+  Kronos are Apache-2.0.
 - `open/high/low/close/volume` are reconciled so `high`/`low` always enclose the
   `open`/`close` body. TimesFM forecasts each series independently; Moirai
-  forecasts them jointly.
+  forecasts them jointly; Kronos samples them as a sequence.
 - Future timestamps use a fixed frequency: exact for crypto (24/7),
   approximate for stocks (nights/weekends).
 - yfinance is an unofficial API: limited intraday history (e.g. 1m ≈ 7 days,

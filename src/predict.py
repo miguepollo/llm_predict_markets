@@ -32,12 +32,18 @@ def forecast(
     pred_len: int = 120,
     lookback: int = 400,
     verbose: bool = False,
+    temperature: float = 1.0,
+    top_p: float = 0.9,
+    sample_count: int = 1,
 ) -> pd.DataFrame:
     """Predicts the next ``pred_len`` candles from the last ``lookback`` ones.
 
     ``df`` must come from :func:`src.data.download_ohlcv` (``timestamps``
     + OHLCV columns). Returns the prediction DataFrame indexed by the
     future timestamps.
+
+    ``temperature``/``top_p``/``sample_count`` only affect the Kronos backend
+    (generative sampling); the other backends ignore them.
     """
     if lookback > predictor.max_context:
         raise ValueError(
@@ -61,6 +67,9 @@ def forecast(
         y_timestamp=y_timestamp,
         pred_len=pred_len,
         verbose=verbose,
+        temperature=temperature,
+        top_p=top_p,
+        sample_count=sample_count,
     )
 
 
@@ -71,6 +80,9 @@ def backtest(
     pred_len: int = 120,
     lookback: int = 400,
     verbose: bool = False,
+    temperature: float = 1.0,
+    top_p: float = 0.9,
+    sample_count: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Predicts a known historical window to compare against reality.
 
@@ -99,6 +111,9 @@ def backtest(
         y_timestamp=y_timestamp,
         pred_len=pred_len,
         verbose=verbose,
+        temperature=temperature,
+        top_p=top_p,
+        sample_count=sample_count,
     )
 
     actual_df = df.iloc[context_end:][["timestamps"] + OHLCV_COLUMNS].reset_index(drop=True)

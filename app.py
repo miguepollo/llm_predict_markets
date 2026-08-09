@@ -33,12 +33,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-st.set_page_config(page_title="TimesFM & Moirai Price Predictor", layout="wide")
+st.set_page_config(page_title="TimesFM · Moirai · Kronos Price Predictor", layout="wide")
 st.title("📈 Foundation-model Price Predictor")
 st.caption(
     "OHLCV candle prediction with Google [TimesFM]"
-    "(https://github.com/google-research/timesfm) or Salesforce [Moirai]"
-    "(https://github.com/SalesforceAIResearch/uni2ts) and Yahoo Finance data. "
+    "(https://github.com/google-research/timesfm), Salesforce [Moirai]"
+    "(https://github.com/SalesforceAIResearch/uni2ts) or [Kronos]"
+    "(https://github.com/shiyu-coder/Kronos) and Yahoo Finance data. "
     "For research purposes only — not financial advice."
 )
 
@@ -48,6 +49,8 @@ def model_label(name: str) -> str:
     cfg = MODEL_REGISTRY[name]
     if cfg.backend == "timesfm":
         return f"TimesFM-{cfg.name} ({cfg.params})"
+    if cfg.backend == "kronos":
+        return f"Kronos {cfg.name.split('-', 1)[1]} ({cfg.params})"
     # moirai-<size> -> "Moirai <size>"
     size = cfg.name.split("-", 1)[1]
     return f"Moirai {size} ({cfg.params})"
@@ -101,7 +104,8 @@ with st.sidebar:
     device = st.selectbox(
         "Compute device", devices, index=0,
         format_func=device_details,
-        help="Both models only accelerate on CUDA; XPU/MPS fall back to CPU.",
+        help="TimesFM/Moirai only accelerate on CUDA; XPU/MPS fall back to "
+             "CPU (Kronos can use them). If unsure, use cpu.",
     )
 
     mode = st.radio("Mode", ["Forecast", "Backtest"], horizontal=True)
@@ -113,6 +117,19 @@ with st.sidebar:
         pred_len = st.slider("Candles to predict", 8, 240, 120, step=8)
     else:
         pred_len = st.slider("Backtest candles", 8, 240, 60, step=8)
+
+    # Sampling controls only affect Kronos (generative token sampling).
+    if cfg.backend == "kronos":
+        st.header("Sampling")
+        temperature = st.slider("Temperature (T)", 0.1, 2.0, 1.0, step=0.1)
+        top_p = st.slider("Top-p", 0.1, 1.0, 0.9, step=0.05)
+        sample_count = st.slider(
+            "Sample count", 1, 20, 1,
+            help="Forecast paths generated and averaged. More samples = "
+                 "smoother prediction, but proportionally slower.",
+        )
+    else:
+        temperature, top_p, sample_count = 1.0, 0.9, 1
 
     run = st.button("🚀 Predict", type="primary", width="stretch")
 
@@ -159,6 +176,7 @@ if mode == "Forecast":
                 predictor, df, interval,
                 pred_len=pred_len, lookback=lookback,
                 verbose=True,
+                temperature=temperature, top_p=top_p, sample_count=sample_count,
             )
         except Exception as e:
             st.error(f"Prediction error: {e}")
@@ -185,6 +203,7 @@ else:  # Backtest
                 predictor, df, interval,
                 pred_len=pred_len, lookback=lookback,
                 verbose=True,
+                temperature=temperature, top_p=top_p, sample_count=sample_count,
             )
         except Exception as e:
             st.error(f"Backtest error: {e}")
