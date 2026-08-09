@@ -27,11 +27,13 @@ dev = [
 pythonpath = ["."]
 testpaths = ["tests"]
 
-# CPU-only torch: avoids downloading several GB of CUDA libraries
+# CUDA build of torch (cu124) to accelerate inference on the NVIDIA GPU.
+# The torch pin is <2.5 (forced by uni2ts/lightning), so we must use the cu124
+# wheelhouse: cu126/cu13x wheels only exist for torch >= 2.6.
 [[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cpu" }
+torch = { index = "pytorch-cu124" }
