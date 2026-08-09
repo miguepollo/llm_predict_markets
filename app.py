@@ -33,13 +33,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-st.set_page_config(page_title="TimesFM Price Predictor", layout="wide")
-st.title("📈 TimesFM Price Predictor")
+st.set_page_config(page_title="TimesFM & Moirai Price Predictor", layout="wide")
+st.title("📈 Foundation-model Price Predictor")
 st.caption(
-    "OHLCV candle prediction with Google's [TimesFM]"
-    "(https://github.com/google-research/timesfm) time-series foundation model "
-    "and Yahoo Finance data. For research purposes only — not financial advice."
+    "OHLCV candle prediction with Google [TimesFM]"
+    "(https://github.com/google-research/timesfm) or Salesforce [Moirai]"
+    "(https://github.com/SalesforceAIResearch/uni2ts) and Yahoo Finance data. "
+    "For research purposes only — not financial advice."
 )
+
+
+def model_label(name: str) -> str:
+    """Human-readable label for a model in the registry."""
+    cfg = MODEL_REGISTRY[name]
+    if cfg.backend == "timesfm":
+        return f"TimesFM-{cfg.name} ({cfg.params})"
+    # moirai-<size> -> "Moirai <size>"
+    size = cfg.name.split("-", 1)[1]
+    return f"Moirai {size} ({cfg.params})"
 
 
 @st.cache_resource(show_spinner=False)
@@ -78,10 +89,10 @@ with st.sidebar:
 
     st.header("Model")
     model_name = st.selectbox(
-        "TimesFM model",
+        "Foundation model",
         list(MODEL_REGISTRY),
         index=list(MODEL_REGISTRY).index(DEFAULT_MODEL),
-        format_func=lambda n: f"TimesFM-{n} ({MODEL_REGISTRY[n].params})",
+        format_func=model_label,
     )
     cfg = MODEL_REGISTRY[model_name]
     st.caption(cfg.description)
@@ -90,7 +101,7 @@ with st.sidebar:
     device = st.selectbox(
         "Compute device", devices, index=0,
         format_func=device_details,
-        help="TimesFM 2.5 only accelerates on CUDA; XPU/MPS fall back to CPU.",
+        help="Both models only accelerate on CUDA; XPU/MPS fall back to CPU.",
     )
 
     mode = st.radio("Mode", ["Forecast", "Backtest"], horizontal=True)
@@ -133,7 +144,7 @@ if not run:
                     width="stretch")
     st.stop()
 
-with st.spinner(f"Loading TimesFM-{model_name} model (first run downloads from HuggingFace)…"):
+with st.spinner(f"Loading {model_label(model_name)} model (first run downloads from HuggingFace)…"):
     logger.info("Predictor requested: model=%s device=%s", model_name, device)
     try:
         predictor = get_predictor(model_name, device)
@@ -155,7 +166,7 @@ if mode == "Forecast":
 
     st.plotly_chart(
         forecast_figure(df.tail(lookback), pred_df,
-                        title=f"{ticker} · {interval} · TimesFM-{model_name}"),
+                        title=f"{ticker} · {interval} · {model_label(model_name)}"),
         width="stretch",
     )
     st.subheader("Predicted candles")
@@ -191,7 +202,7 @@ else:  # Backtest
 
     st.plotly_chart(
         backtest_figure(context_df, actual_df, pred_df,
-                        title=f"{ticker} · {interval} · backtest TimesFM-{model_name}"),
+                        title=f"{ticker} · {interval} · backtest {model_label(model_name)}"),
         width="stretch",
     )
 

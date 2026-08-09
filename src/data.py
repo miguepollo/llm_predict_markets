@@ -1,8 +1,7 @@
 """OHLCV series download from Yahoo Finance, normalized to the app schema.
 
 The app uses lowercase ``open, high, low, close`` columns plus ``volume`` and
-``amount``, together with a Series of timestamps. ``close`` is the series fed
-to TimesFM.
+``amount``, together with a Series of timestamps, fed to the forecasting models.
 """
 
 from __future__ import annotations

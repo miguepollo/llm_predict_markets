@@ -1,14 +1,15 @@
 [project]
 name = "timesfm-predict"
-version = "0.2.0"
-description = "Price prediction with Google's TimesFM (time-series foundation model) + Yahoo Finance"
+version = "0.3.0"
+description = "Price prediction with TimesFM and Moirai (time-series foundation models) + Yahoo Finance"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "numpy",
     "pandas>=2.2,<2.4",
-    "torch>=2.2",
-    "einops==0.8.1",
+    "torch>=2.2,<2.5",
+    "einops==0.7.0",
     "timesfm>=2.0.2,<3",
+    "uni2ts>=2.0,<3",
     "huggingface_hub>=0.33,<2.0",
     "safetensors>=0.6",
     "tqdm>=4.67",

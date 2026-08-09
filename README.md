@@ -1,16 +1,19 @@
-# TimesFM Price Predictor
+# TimesFM & Moirai Price Predictor
 
 Local price prediction app (OHLCV candles) using Google's
-[**TimesFM**](https://github.com/google-research/timesfm) time-series
-foundation model (Apache-2.0) and **Yahoo Finance** data. For research purposes
-only — **not financial advice**.
+[**TimesFM**](https://github.com/google-research/timesfm) (Apache-2.0) or
+Salesforce's [**Moirai**](https://github.com/SalesforceAIResearch/uni2ts)
+(CC-BY-NC-4.0) plus **Yahoo Finance** data. For research purposes only —
+**not financial advice**.
 
 ## Features
 
 - Downloads OHLCV series from Yahoo Finance by **ticker** and **timeframe**
   (1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk).
-- **Configurable model**: TimesFM 2.5 (`200M` params, up to 16k context). Weights
-  are downloaded from HuggingFace on first run.
+- **Two interchangeable foundation models** (sidebar):
+  - **TimesFM 2.5** — `200M` params, point forecast, Apache-2.0.
+  - **Moirai 1.1-R** — `small`/`base`/`large` (14M/91M/311M), probabilistic and
+    truly **multivariate** (forecasts all OHLCV variates together).
 - **Forecast mode**: predicts the next N candles from recent context.
 - **Backtest mode**: predicts a known historical window and compares it against
   reality (MAE, RMSE, MAPE, directional accuracy, actual vs predicted chart).
@@ -20,19 +23,29 @@ only — **not financial advice**.
 
 ## How prediction works
 
-TimesFM is a **univariate point-forecast** foundation model. Its `forecast()`
-method predicts several series in a single batched call, so this app forecasts
-the five OHLCV series (**open, high, low, close, volume**) independently in one
-forward pass. Each predicted candle is then reconciled so the geometry is
-consistent: `high = max(hi, open, close)` and `low = min(lo, open, close)`, and
-volume is clamped at `>= 0`. `amount = volume * mean price`.
+Both models feed the five OHLCV series (**open, high, low, close, volume**) and
+return a forecast for each candle:
+
+- **TimesFM** is a univariate point-forecast model; its `forecast()` accepts
+  several series in one batched call, so the five series are forecast
+  independently in a single forward pass.
+- **Moirai** is a multivariate probabilistic transformer; it forecasts all five
+  variates **jointly** (one series with `target_dim = 5`), so cross-series
+  correlation is modeled. The median over sampled trajectories is used as the
+  point forecast.
+
+Either way each predicted candle is reconciled so the geometry is consistent:
+`high = max(hi, open, close)`, `low = min(lo, open, close)`, and
+`volume = max(vol, 0)`. `amount = volume * mean price`.
 
 ## Installation
 
-Requires [uv](https://docs.astral.sh/uv/) (manages Python 3.11 automatically):
+Requires [uv](https://docs.astral.sh/uv/) (manages Python 3.11 automatically).
+Installation also pulls in `uni2ts` (Moirai), which pins **torch <2.5**, numpy
+1.26 and einops 0.7; this is shared with TimesFM.
 
 ```bash
-uv sync --python 3.11   # installs CPU-only torch + timesfm from PyPI
+uv sync --python 3.11   # CPU-only torch + timesfm + uni2ts from PyPI
 ```
 
 ## Usage
@@ -42,13 +55,14 @@ uv run streamlit run app.py
 ```
 
 Open http://localhost:8501, pick ticker/timeframe/model and press **Predict**.
+The first run of each model downloads its weights from HuggingFace.
 
 Startup and model-loading logs (including the selected inference device) are
 printed to the console where Streamlit runs, e.g.:
 
 ```
-INFO src.models: torch 2.13.0+cpu | inference device: cpu -> CPU (4 torch threads)
-INFO src.models: TimesFM-2.5 ready on cpu in 7.9s (max_context=1024, max_horizon=256)
+INFO src.models: torch 2.4.1+cpu | inference device: cpu -> CPU (8 torch threads)
+INFO src.models: moirai-moirai-base ready on cpu in 7.9s (max_context=512)
 ```
 
 ## Parameters
@@ -67,22 +81,22 @@ All parameters are set in the sidebar:
 
 | Parameter | What it does |
 |---|---|
-| **TimesFM model** | Which pre-trained model to use. `2.5` is the current release (200M, context 1024 configured for CPU-friendly speed). |
-| **Compute device** | `cpu` or `cuda`. TimesFM 2.5 torch only accelerates on CUDA; XPU/MPS fall back to CPU. |
+| **Foundation model** | `TimesFM-2.5` (point forecast), `Moirai small/base/large` (probabilistic + true multivariate). Default: `moirai-base`. |
+| **Compute device** | `cpu` or `cuda`. Both models only accelerate on CUDA; XPU/MPS fall back to CPU. |
 | **Mode** | `Forecast`: predicts the next N candles into the future. `Backtest`: predicts a known historical window and compares it against reality with metrics (MAE, RMSE, MAPE, directional accuracy) — use this to judge whether the model works for your ticker/timeframe before trusting a forecast. |
-| **Lookback** | Number of past candles fed to the model as context. TimesFM patches the series in windows of 32, so the slider uses multiples of 32 (64–1024). More context = more information, but slower. |
+| **Lookback** | Number of past candles fed as context (multiples of 32; up to 1024 for TimesFM, 512 for Moirai). More context = more information, but slower. |
 | **Candles to predict / Backtest candles** | Prediction horizon (`pred_len`, max 240): how many candles the model generates. Longer horizons are slower and less reliable. |
 
 ## Hardware acceleration
 
 The app picks the compute device from the sidebar ("Compute device"). The list
-is auto-detected from torch and limited to `cpu` and `cuda`, because TimesFM's
+is auto-detected from torch and limited to `cpu` and `cuda`, because the models'
 torch inference only runs natively on those.
 
 - To use CUDA, install a CUDA-enabled torch build instead of the default CPU one
   (e.g. change the `pytorch-cpu` index in `pyproject.toml` to a CUDA wheel) and
   re-run `uv sync`.
-- Intel GPU (XPU), MPS and Intel NPU are **not** used by TimesFM in this app.
+- Intel GPU (XPU), MPS and Intel NPU are **not** used by these models.
 
 ## Tests
 
@@ -96,7 +110,7 @@ uv run pytest
 app.py              # Streamlit UI
 src/
   data.py           # yfinance -> normalized OHLCV DataFrame
-  models.py         # TimesFM registry (2.5) + cached loading + TimesFMPredictor
+  models.py         # registry (timesfm + moirai), caching, predictors
   predict.py        # forecast and backtest on top of a predictor
   backtest.py       # metrics: MAE/RMSE/MAPE/directional accuracy
   plotting.py       # Plotly candlestick charts
@@ -107,12 +121,14 @@ tests/              # unit tests (no network, no model)
 
 - **No model predicts the market reliably**; backtests are meant to assess
   forecast quality for each specific ticker/timeframe.
-- TimesFM predicts **open, high, low, close** and volume independently (each in
-  its own univariate forecast within one batched call); the candle geometry is
-  then reconciled so `high`/`low` always enclose the `open`/`close` body.
+- Moirai weights are licensed **CC-BY-NC-4.0** (non-commercial); TimesFM is
+  Apache-2.0.
+- `open/high/low/close/volume` are reconciled so `high`/`low` always enclose the
+  `open`/`close` body. TimesFM forecasts each series independently; Moirai
+  forecasts them jointly.
 - Future timestamps use a fixed frequency: exact for crypto (24/7),
   approximate for stocks (nights/weekends).
 - yfinance is an unofficial API: limited intraday history (e.g. 1m ≈ 7 days,
   1h ≈ 2 years) and possible rate limits.
-- On CPU, forecasting with context 1024 returns in seconds-to-tens-of-seconds
-  depending on `pred_len`.
+- On CPU, forecasting returns in seconds-to-tens-of-seconds depending on the
+  model, context and `pred_len`.
