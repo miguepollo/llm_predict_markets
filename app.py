@@ -1,4 +1,4 @@
-"""Streamlit app: price prediction with Kronos + Yahoo Finance.
+"""Streamlit app: price prediction with TimesFM + Yahoo Finance.
 
 Run with:  uv run streamlit run app.py
 """
@@ -33,12 +33,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-st.set_page_config(page_title="Kronos Price Predictor", layout="wide")
-st.title("📈 Kronos Price Predictor")
+st.set_page_config(page_title="TimesFM Price Predictor", layout="wide")
+st.title("📈 TimesFM Price Predictor")
 st.caption(
-    "OHLCV candle prediction with the [Kronos]"
-    "(https://github.com/shiyu-coder/Kronos) foundation model and Yahoo "
-    "Finance data. For research purposes only — not financial advice."
+    "OHLCV candle prediction with Google's [TimesFM]"
+    "(https://github.com/google-research/timesfm) time-series foundation model "
+    "and Yahoo Finance data. For research purposes only — not financial advice."
 )
 
 
@@ -78,37 +78,30 @@ with st.sidebar:
 
     st.header("Model")
     model_name = st.selectbox(
-        "Kronos model",
+        "TimesFM model",
         list(MODEL_REGISTRY),
         index=list(MODEL_REGISTRY).index(DEFAULT_MODEL),
-        format_func=lambda n: f"{n} ({MODEL_REGISTRY[n].params})",
+        format_func=lambda n: f"TimesFM-{n} ({MODEL_REGISTRY[n].params})",
     )
     cfg = MODEL_REGISTRY[model_name]
     st.caption(cfg.description)
 
-    devices = get_available_devices()
+    devices = [d for d in get_available_devices() if d in ("cpu", "cuda")]
     device = st.selectbox(
         "Compute device", devices, index=0,
         format_func=device_details,
-        help="'xpu' is Intel GPU (Arc/Iris Xe) and requires a torch XPU build "
-             "(see README). If unsure, use cpu.",
+        help="TimesFM 2.5 only accelerates on CUDA; XPU/MPS fall back to CPU.",
     )
 
     mode = st.radio("Mode", ["Forecast", "Backtest"], horizontal=True)
 
-    lookback_default = min(400, cfg.max_context)
+    lookback_default = min(384, cfg.max_context)
     lookback = st.slider("Lookback (context candles)", 64, cfg.max_context,
                          lookback_default, step=32)
     if mode == "Forecast":
         pred_len = st.slider("Candles to predict", 8, 240, 120, step=8)
     else:
         pred_len = st.slider("Backtest candles", 8, 240, 60, step=8)
-
-    st.header("Sampling")
-    temperature = st.slider("Temperature (T)", 0.1, 2.0, 1.0, step=0.1)
-    top_p = st.slider("Top-p", 0.1, 1.0, 0.9, step=0.05)
-    sample_count = st.slider("Sample count", 1, 20, 1,
-                             help="Forecast paths generated and averaged. More samples = smoother prediction, but proportionally slower.")
 
     run = st.button("🚀 Predict", type="primary", width="stretch")
 
@@ -140,7 +133,7 @@ if not run:
                     width="stretch")
     st.stop()
 
-with st.spinner(f"Loading Kronos-{model_name} model (first run downloads from HuggingFace)…"):
+with st.spinner(f"Loading TimesFM-{model_name} model (first run downloads from HuggingFace)…"):
     logger.info("Predictor requested: model=%s device=%s", model_name, device)
     try:
         predictor = get_predictor(model_name, device)
@@ -154,7 +147,7 @@ if mode == "Forecast":
             pred_df = forecast(
                 predictor, df, interval,
                 pred_len=pred_len, lookback=lookback,
-                temperature=temperature, top_p=top_p, sample_count=sample_count,
+                verbose=True,
             )
         except Exception as e:
             st.error(f"Prediction error: {e}")
@@ -162,7 +155,7 @@ if mode == "Forecast":
 
     st.plotly_chart(
         forecast_figure(df.tail(lookback), pred_df,
-                        title=f"{ticker} · {interval} · Kronos-{model_name}"),
+                        title=f"{ticker} · {interval} · TimesFM-{model_name}"),
         width="stretch",
     )
     st.subheader("Predicted candles")
@@ -180,7 +173,7 @@ else:  # Backtest
             pred_df, actual_df = backtest(
                 predictor, df, interval,
                 pred_len=pred_len, lookback=lookback,
-                temperature=temperature, top_p=top_p, sample_count=sample_count,
+                verbose=True,
             )
         except Exception as e:
             st.error(f"Backtest error: {e}")
@@ -198,7 +191,7 @@ else:  # Backtest
 
     st.plotly_chart(
         backtest_figure(context_df, actual_df, pred_df,
-                        title=f"{ticker} · {interval} · backtest Kronos-{model_name}"),
+                        title=f"{ticker} · {interval} · backtest TimesFM-{model_name}"),
         width="stretch",
     )
 

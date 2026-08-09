@@ -1,67 +1,56 @@
-"""Kronos model registry and predictor loading.
+"""TimesFM model registry and predictor loading.
 
-Kronos has no official PyPI package, so the repo is vendored under
-``vendor/Kronos`` and imported from there. Models available on
-HuggingFace (https://huggingface.co/NeoQuasar):
+Google's TimesFM (Time Series Foundation Model) is a univariate point-forecast
+foundation model. We use TimesFM 2.5 (200M params), which dropped the
+frequency-indicator input and supports long contexts (up to 16k) plus an
+optional continuous quantile head. Weights are downloaded from HuggingFace
+(https://huggingface.co/google/timesfm-2.5-200m-pytorch).
 
-- mini : 4.1M params, context 2048, 2k tokenizer   -> ideal for CPU
-- small: 24.7M params, context 512                 -> balanced (default)
-- base : 102.3M params, context 512                -> best quality, slow on CPU
-- large: 499.2M params, NOT published
+TimesFM predicts a single target series per call. This app feeds it the
+**close** price series; the other candle fields (open/high/low/volume/amount)
+are reconstructed around the forecast closes so candles keep rendering (see
+:class:`TimesFMPredictor`).
 """
 
 from __future__ import annotations
 
 import logging
-import sys
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
+
+import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-VENDOR_KRONOS_PATH = Path(__file__).resolve().parent.parent / "vendor" / "Kronos"
+# TimesFM 2.5 patches the context into windows of `input_patch_len` (32).
+# Context/inputs must be a multiple of this.
+PATCH_LEN = 32
 
 
 @dataclass(frozen=True)
 class ModelConfig:
     name: str
     hf_model_id: str
-    hf_tokenizer_id: str
     max_context: int
+    max_horizon: int
     params: str
     description: str
 
 
 MODEL_REGISTRY: dict[str, ModelConfig] = {
-    "mini": ModelConfig(
-        name="mini",
-        hf_model_id="NeoQuasar/Kronos-mini",
-        hf_tokenizer_id="NeoQuasar/Kronos-Tokenizer-2k",
-        max_context=2048,
-        params="4.1M",
-        description="Lightweight and fast, ideal for CPU. Long context (2048).",
-    ),
-    "small": ModelConfig(
-        name="small",
-        hf_model_id="NeoQuasar/Kronos-small",
-        hf_tokenizer_id="NeoQuasar/Kronos-Tokenizer-base",
-        max_context=512,
-        params="24.7M",
-        description="Quality/speed balance. Recommended default.",
-    ),
-    "base": ModelConfig(
-        name="base",
-        hf_model_id="NeoQuasar/Kronos-base",
-        hf_tokenizer_id="NeoQuasar/Kronos-Tokenizer-base",
-        max_context=512,
-        params="102.3M",
-        description="Best available quality, but slow on CPU.",
+    "2.5": ModelConfig(
+        name="2.5",
+        hf_model_id="google/timesfm-2.5-200m-pytorch",
+        max_context=1024,
+        max_horizon=256,
+        params="200M",
+        description="TimesFM 2.5 (200M). Default, good CPU/quality balance.",
     ),
 }
 
-DEFAULT_MODEL = "small"
+DEFAULT_MODEL = "2.5"
 
 
 def device_details(device: str) -> str:
@@ -95,10 +84,10 @@ def available_devices() -> list[str]:
 
     - ``cpu``: always available.
     - ``cuda``: NVIDIA GPU (torch with CUDA).
-    - ``xpu``: Intel GPU (Arc / Iris Xe) via torch XPU backend. On Linux
-      requires a torch XPU build (download.pytorch.org/whl/xpu) and,
-      depending on the GPU, intel-extension-for-pytorch.
-    - ``mps``: Apple Silicon.
+
+    Note: TimesFM 2.5's torch inference only accelerates on CUDA and falls back
+    to CPU otherwise, so XPU/MPS are intentionally not offered here (unlike the
+    old Kronos backend).
     """
     devices = ["cpu"]
     try:
@@ -106,10 +95,6 @@ def available_devices() -> list[str]:
 
         if torch.cuda.is_available():
             devices.append("cuda")
-        if hasattr(torch, "xpu") and torch.xpu.is_available():
-            devices.append("xpu")
-        if torch.backends.mps.is_available():
-            devices.append("mps")
     except Exception:
         pass
     logger.debug(
@@ -119,24 +104,78 @@ def available_devices() -> list[str]:
     return devices
 
 
-def _ensure_kronos_importable() -> None:
-    """Adds vendor/Kronos to sys.path so `from model import ...` works."""
-    path = str(VENDOR_KRONOS_PATH)
-    if not VENDOR_KRONOS_PATH.is_dir():
-        raise FileNotFoundError(
-            f"Vendored Kronos repo not found at {VENDOR_KRONOS_PATH}. "
-            "Clone it with: git clone https://github.com/shiyu-coder/Kronos vendor/Kronos"
+class TimesFMPredictor:
+    """Wraps TimesFM and exposes a predictor-compatible ``predict()`` interface.
+
+    TimesFM is a univariate point-forecast model, but its ``forecast()`` method
+    accepts several series in a single batched call. This app forecasts the
+    five OHLCV series (**open, high, low, close, volume**) independently in one
+    forward pass and then reconciles each candle so the geometry is consistent:
+
+    - ``open`` / ``close``: TimesFM point forecasts.
+    - ``high`` = max(hi_forecast, open, close).
+    - ``low``  = min(lo_forecast, open, close).
+    - ``volume``: TimesFM forecast, clamped at >= 0.
+    - ``amount`` = volume * mean price.
+
+    The returned DataFrame is indexed by the future timestamps, with columns
+    ``open, high, low, close, volume, amount``.
+    """
+
+    # Column name -> position in the batched ``inputs`` list.
+    _SERIES = ["open", "high", "low", "close", "volume"]
+
+    def __init__(self, model, max_context: int):
+        self.model = model
+        self.max_context = max_context
+
+    def predict(
+        self,
+        df: pd.DataFrame,
+        x_timestamp: pd.Series,
+        y_timestamp: pd.Series,
+        pred_len: int = 120,
+        verbose: bool = False,
+    ) -> pd.DataFrame:
+        """Predicts ``pred_len`` candles from the OHLCV context ``df``."""
+        if pred_len < 1:
+            raise ValueError(f"pred_len must be >= 1, got {pred_len}.")
+        if len(df) < 2:
+            raise ValueError("At least 2 context candles are required.")
+
+        inputs = [df[c].to_numpy(dtype=np.float64) for c in self._SERIES]
+        point, _ = self.model.forecast(horizon=int(pred_len), inputs=inputs)
+        pred = np.asarray(point, dtype=np.float64)  # shape (5, pred_len)
+
+        f_open, f_high, f_low, f_close, f_volume = pred
+
+        # Reconcile candle geometry: high/low must enclose the open/close body.
+        high = np.maximum(f_high, np.maximum(f_open, f_close))
+        low = np.minimum(f_low, np.minimum(f_open, f_close))
+        volume = np.maximum(f_volume, 0.0)
+        amount = volume * (f_open + high + low + f_close) / 4.0
+
+        index = pd.DatetimeIndex(y_timestamp)
+        index.name = "timestamps"
+        return pd.DataFrame(
+            {
+                "open": f_open,
+                "high": high,
+                "low": low,
+                "close": f_close,
+                "volume": volume,
+                "amount": amount,
+            },
+            index=index,
         )
-    if path not in sys.path:
-        sys.path.insert(0, path)
 
 
 @lru_cache(maxsize=3)
 def load_predictor(model_name: str = DEFAULT_MODEL, device: str = "cpu"):
-    """Loads (cached) tokenizer + model and returns a KronosPredictor.
+    """Loads (cached) the TimesFM model and returns a TimesFMPredictor.
 
-    The first call downloads the weights from HuggingFace (~10-400 MB
-    depending on the model). Subsequent calls reuse the instance.
+    The first call downloads the weights from HuggingFace (~800 MB) and
+    compiles the forecast loop. Subsequent calls reuse the instance.
     """
     if model_name not in MODEL_REGISTRY:
         raise ValueError(
@@ -148,27 +187,34 @@ def load_predictor(model_name: str = DEFAULT_MODEL, device: str = "cpu"):
     import torch
 
     logger.info(
-        "Initializing Kronos-%s (%s params) | tokenizer=%s model=%s",
-        model_name, cfg.params, cfg.hf_tokenizer_id, cfg.hf_model_id,
+        "Initializing TimesFM-%s (%s params) | model=%s device=%s",
+        model_name, cfg.params, cfg.hf_model_id, device,
     )
     logger.info("torch %s | inference device: %s -> %s",
                 torch.__version__, device, device_details(device))
+    torch.set_float32_matmul_precision("high")
 
     t0 = time.time()
-    _ensure_kronos_importable()
-    from model import Kronos, KronosPredictor, KronosTokenizer  # noqa: PLC0415
 
-    tokenizer = KronosTokenizer.from_pretrained(cfg.hf_tokenizer_id)
-    model = Kronos.from_pretrained(cfg.hf_model_id)
-    predictor = KronosPredictor(
-        model,
-        tokenizer,
-        device=device,
-        max_context=cfg.max_context,
+    import timesfm  # noqa: PLC0415
+
+    model = timesfm.TimesFM_2p5_200M_torch.from_pretrained(cfg.hf_model_id)
+    model.compile(
+        timesfm.ForecastConfig(
+            max_context=cfg.max_context,
+            max_horizon=cfg.max_horizon,
+            normalize_inputs=True,
+            use_continuous_quantile_head=True,
+            force_flip_invariance=True,
+            infer_is_positive=True,
+            fix_quantile_crossing=True,
+        )
     )
-    predictor.eval = getattr(model, "eval", lambda: None)  # ensure eval mode
+    model.model.eval()
+
+    predictor = TimesFMPredictor(model, max_context=cfg.max_context)
     logger.info(
-        "Kronos-%s ready on %s in %.1fs (max_context=%d)",
-        model_name, device, time.time() - t0, cfg.max_context,
+        "TimesFM-%s ready on %s in %.1fs (max_context=%d, max_horizon=%d)",
+        model_name, device, time.time() - t0, cfg.max_context, cfg.max_horizon,
     )
     return predictor

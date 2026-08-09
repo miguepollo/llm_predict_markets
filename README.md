@@ -1,34 +1,38 @@
-# Kronos Price Predictor
+# TimesFM Price Predictor
 
-Local price prediction app (OHLCV candles) using the
-[**Kronos**](https://github.com/shiyu-coder/Kronos) foundation model (MIT)
-and **Yahoo Finance** data. For research purposes only — **not financial advice**.
+Local price prediction app (OHLCV candles) using Google's
+[**TimesFM**](https://github.com/google-research/timesfm) time-series
+foundation model (Apache-2.0) and **Yahoo Finance** data. For research purposes
+only — **not financial advice**.
 
 ## Features
 
 - Downloads OHLCV series from Yahoo Finance by **ticker** and **timeframe**
   (1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk).
-- **Configurable model**: Kronos `mini` (4.1M, ctx 2048), `small` (24.7M, ctx 512)
-  or `base` (102M, ctx 512). Weights are downloaded from HuggingFace on first run.
+- **Configurable model**: TimesFM 2.5 (`200M` params, up to 16k context). Weights
+  are downloaded from HuggingFace on first run.
 - **Forecast mode**: predicts the next N candles from recent context.
 - **Backtest mode**: predicts a known historical window and compares it against
   reality (MAE, RMSE, MAPE, directional accuracy, actual vs predicted chart).
 - Interactive candlestick charts (Plotly) and CSV export.
-- Runs on **CPU** by default; **Intel GPU (XPU)** supported with a torch XPU
-  build (see below). Selectable in the sidebar ("Compute device").
+- Runs on **CPU** by default; **NVIDIA GPU (CUDA)** supported if torch is built
+  with CUDA. Selectable in the sidebar ("Compute device").
+
+## How prediction works
+
+TimesFM is a **univariate point-forecast** foundation model. Its `forecast()`
+method predicts several series in a single batched call, so this app forecasts
+the five OHLCV series (**open, high, low, close, volume**) independently in one
+forward pass. Each predicted candle is then reconciled so the geometry is
+consistent: `high = max(hi, open, close)` and `low = min(lo, open, close)`, and
+volume is clamped at `>= 0`. `amount = volume * mean price`.
 
 ## Installation
 
 Requires [uv](https://docs.astral.sh/uv/) (manages Python 3.11 automatically):
 
 ```bash
-# 1. Vendor Kronos (no official PyPI package exists)
-git clone https://github.com/shiyu-coder/Kronos vendor/Kronos
-# Version verified by this project:
-git -C vendor/Kronos checkout 67b630e67f6a18c9e9be918d9b4337c960db1e9a
-
-# 2. Install dependencies (CPU-only torch included)
-uv sync --python 3.11
+uv sync --python 3.11   # installs CPU-only torch + timesfm from PyPI
 ```
 
 ## Usage
@@ -39,12 +43,12 @@ uv run streamlit run app.py
 
 Open http://localhost:8501, pick ticker/timeframe/model and press **Predict**.
 
-Startup and model-loading logs (including the selected inference device and
-driver details) are printed to the console where Streamlit runs, e.g.:
+Startup and model-loading logs (including the selected inference device) are
+printed to the console where Streamlit runs, e.g.:
 
 ```
 INFO src.models: torch 2.13.0+cpu | inference device: cpu -> CPU (4 torch threads)
-INFO src.models: Kronos-small ready on cpu in 7.9s (max_context=512)
+INFO src.models: TimesFM-2.5 ready on cpu in 7.9s (max_context=1024, max_horizon=256)
 ```
 
 ## Parameters
@@ -63,92 +67,22 @@ All parameters are set in the sidebar:
 
 | Parameter | What it does |
 |---|---|
-| **Kronos model** | Which pre-trained model to use. `mini` (4.1M params, context 2048: fastest, best for CPU), `small` (24.7M, context 512: default balance), `base` (102M, context 512: best quality, slow on CPU). |
+| **TimesFM model** | Which pre-trained model to use. `2.5` is the current release (200M, context 1024 configured for CPU-friendly speed). |
+| **Compute device** | `cpu` or `cuda`. TimesFM 2.5 torch only accelerates on CUDA; XPU/MPS fall back to CPU. |
 | **Mode** | `Forecast`: predicts the next N candles into the future. `Backtest`: predicts a known historical window and compares it against reality with metrics (MAE, RMSE, MAPE, directional accuracy) — use this to judge whether the model works for your ticker/timeframe before trusting a forecast. |
-| **Lookback** | Number of past candles fed to the model as context. More context = more information, but slower. Capped by the model's context length (512 for small/base, 2048 for mini). |
-| **Candles to predict / Backtest candles** | Prediction horizon (`pred_len`): how many candles the model generates. Longer horizons are slower and less reliable. |
+| **Lookback** | Number of past candles fed to the model as context. TimesFM patches the series in windows of 32, so the slider uses multiples of 32 (64–1024). More context = more information, but slower. |
+| **Candles to predict / Backtest candles** | Prediction horizon (`pred_len`, max 240): how many candles the model generates. Longer horizons are slower and less reliable. |
 
-### Sampling
-
-Kronos is a generative model: each forecast is a sample from a probability
-distribution. These parameters control the sampling process:
-
-| Parameter | What it does |
-|---|---|
-| **Temperature (T)** | Randomness of the sampling (0.1–2.0). Lower = more conservative, closer to the most likely path. Higher = more diverse and volatile paths. Values around 1.0 are a good default. |
-| **Top-p** | Nucleus sampling threshold (0.1–1.0). Only tokens within the top cumulative probability `p` are considered. Lower = safer, less diverse predictions; 0.9 is a good default. |
-| **Sample count** | Number of independent forecast paths generated and averaged into the final prediction (1–20). More samples = smoother, more stable results, at linear CPU cost (20 samples ≈ 20× the compute of a single one). |
-
-## Hardware acceleration: Intel GPU (XPU) and NPU
+## Hardware acceleration
 
 The app picks the compute device from the sidebar ("Compute device"). The list
-is auto-detected from torch: `cpu` always; `cuda`, `xpu` (Intel GPU) or `mps`
-(Apple) appear only when available.
+is auto-detected from torch and limited to `cpu` and `cuda`, because TimesFM's
+torch inference only runs natively on those.
 
-### Intel GPU (Arc, Iris Xe, Core Ultra iGPU) — XPU backend
-
-PyTorch ships an XPU backend for Intel GPUs. To enable it:
-
-1. **Install the Intel GPU compute runtime** (Ubuntu example):
-   ```bash
-   sudo apt install intel-opencl-icd libze1
-   # For newer Arc/Core Ultra systems, follow:
-   # https://www.intel.com/content/www/us/en/docs/oneapi/installation-guide-linux/
-   ```
-2. **Switch torch from the CPU build to the XPU build** in `pyproject.toml`:
-   ```toml
-   [[tool.uv.index]]
-   name = "pytorch-xpu"
-   url = "https://download.pytorch.org/whl/xpu"
-   explicit = true
-
-   [tool.uv.sources]
-   torch = { index = "pytorch-xpu" }
-   ```
-   Then reinstall:
-   ```bash
-   uv sync --python 3.11
-   ```
-3. **(Optional)** Install Intel Extension for PyTorch for extra optimized ops:
-   ```bash
-   uv pip install intel-extension-for-pytorch
-   ```
-4. **Verify** the GPU is visible and run the app:
-   ```bash
-   uv run python -c "import torch; print(torch.xpu.is_available(), torch.xpu.get_device_name(0))"
-   uv run streamlit run app.py   # select "xpu" in the sidebar
-   ```
-
-Notes:
-- No changes to the app code are needed: `KronosPredictor` receives the device
-  explicitly and moves model + tensors with `.to(device)`.
-- Some ops may fall back to CPU with a warning on older iGPUs; Arc discrete
-  GPUs have the best XPU coverage.
-- Kronos' own device auto-detection only knows cuda/mps/cpu, which is why this
-  project always passes the device explicitly.
-
-### Intel NPU (AI Boost, Core Ultra) — not plug-and-play
-
-PyTorch has **no native NPU backend**; Intel NPUs are accessed through
-**OpenVINO**. Kronos is a custom autoregressive model (Python sampling loop
-with dynamic shapes), so it does not run on the NPU out of the box. A real
-integration would require:
-
-1. Install the NPU driver (`intel_vpu`, included in recent Linux kernels) and
-   [OpenVINO](https://docs.openvino.ai/) with NPU plugin:
-   ```bash
-   uv pip install openvino
-   ```
-2. Export the Kronos tokenizer and transformer to OpenVINO IR
-   (`optimum-intel` / `ovc`), or wrap single-step forwards with
-   `torch.compile(model, backend="openvino")`.
-3. Re-implement the autoregressive generation loop
-   (`vendor/Kronos/model/kronos.py::auto_regressive_inference`) around the
-   exported models.
-
-This is a significant engineering effort and is **not currently supported** by
-this app. For faster inference today, use an Intel GPU via XPU (above) or the
-`mini` model on CPU.
+- To use CUDA, install a CUDA-enabled torch build instead of the default CPU one
+  (e.g. change the `pytorch-cpu` index in `pyproject.toml` to a CUDA wheel) and
+  re-run `uv sync`.
+- Intel GPU (XPU), MPS and Intel NPU are **not** used by TimesFM in this app.
 
 ## Tests
 
@@ -161,22 +95,24 @@ uv run pytest
 ```
 app.py              # Streamlit UI
 src/
-  data.py           # yfinance -> normalized OHLCV DataFrame (Kronos format)
-  models.py         # model registry (mini/small/base) + cached loading
-  predict.py        # forecast and backtest on top of KronosPredictor
+  data.py           # yfinance -> normalized OHLCV DataFrame
+  models.py         # TimesFM registry (2.5) + cached loading + TimesFMPredictor
+  predict.py        # forecast and backtest on top of a predictor
   backtest.py       # metrics: MAE/RMSE/MAPE/directional accuracy
   plotting.py       # Plotly candlestick charts
 tests/              # unit tests (no network, no model)
-vendor/Kronos/      # Kronos repo (pinned commit, see above)
 ```
 
 ## Notes and limitations
 
 - **No model predicts the market reliably**; backtests are meant to assess
   forecast quality for each specific ticker/timeframe.
+- TimesFM predicts **open, high, low, close** and volume independently (each in
+  its own univariate forecast within one batched call); the candle geometry is
+  then reconciled so `high`/`low` always enclose the `open`/`close` body.
 - Future timestamps use a fixed frequency: exact for crypto (24/7),
   approximate for stocks (nights/weekends).
 - yfinance is an unofficial API: limited intraday history (e.g. 1m ≈ 7 days,
   1h ≈ 2 years) and possible rate limits.
-- On CPU: `mini` and `small` respond in seconds; `base` can take minutes
+- On CPU, forecasting with context 1024 returns in seconds-to-tens-of-seconds
   depending on `pred_len`.

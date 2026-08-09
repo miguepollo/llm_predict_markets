@@ -31,9 +31,6 @@ def forecast(
     interval: str,
     pred_len: int = 120,
     lookback: int = 400,
-    temperature: float = 1.0,
-    top_p: float = 0.9,
-    sample_count: int = 1,
     verbose: bool = False,
 ) -> pd.DataFrame:
     """Predicts the next ``pred_len`` candles from the last ``lookback`` ones.
@@ -63,9 +60,6 @@ def forecast(
         x_timestamp=x_timestamp,
         y_timestamp=y_timestamp,
         pred_len=pred_len,
-        T=temperature,
-        top_p=top_p,
-        sample_count=sample_count,
         verbose=verbose,
     )
 
@@ -76,9 +70,6 @@ def backtest(
     interval: str,
     pred_len: int = 120,
     lookback: int = 400,
-    temperature: float = 1.0,
-    top_p: float = 0.9,
-    sample_count: int = 1,
     verbose: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Predicts a known historical window to compare against reality.
@@ -107,9 +98,6 @@ def backtest(
         x_timestamp=x_timestamp,
         y_timestamp=y_timestamp,
         pred_len=pred_len,
-        T=temperature,
-        top_p=top_p,
-        sample_count=sample_count,
         verbose=verbose,
     )
 

@@ -1,7 +1,8 @@
-"""OHLCV series download from Yahoo Finance, normalized to the Kronos format.
+"""OHLCV series download from Yahoo Finance, normalized to the app schema.
 
-Kronos expects a DataFrame with ``open, high, low, close`` columns and
-optionally ``volume`` and ``amount``, plus a Series of timestamps.
+The app uses lowercase ``open, high, low, close`` columns plus ``volume`` and
+``amount``, together with a Series of timestamps. ``close`` is the series fed
+to TimesFM.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ REQUIRED_COLUMNS = ["open", "high", "low", "close"]
 
 
 def download_ohlcv(ticker: str, interval: str = "1h", period: str = "1mo") -> pd.DataFrame:
-    """Downloads candles from Yahoo Finance and normalizes them to Kronos format.
+    """Downloads candles from Yahoo Finance and normalizes them.
 
     Returns a DataFrame with columns
     ``timestamps, open, high, low, close, volume, amount`` sorted ascending
@@ -76,7 +77,7 @@ def download_ohlcv(ticker: str, interval: str = "1h", period: str = "1mo") -> pd
 
 
 def _normalize(raw: pd.DataFrame) -> pd.DataFrame:
-    """Normalizes the raw yfinance DataFrame to the Kronos schema."""
+    """Normalizes the raw yfinance DataFrame to the app schema."""
     df = raw.copy()
 
     # yfinance returns MultiIndex columns when downloading several tickers
@@ -93,7 +94,8 @@ def _normalize(raw: pd.DataFrame) -> pd.DataFrame:
     if "volume" not in df.columns:
         df["volume"] = 0.0
 
-    # amount = volume * approximate mean price (Kronos uses it as an optional feature)
+    # amount = volume * approximate mean price (TimesFM only uses close, but
+    # we keep the full OHLCV schema for candles)
     if "amount" not in df.columns:
         df["amount"] = df["volume"] * (df["open"] + df["high"] + df["low"] + df["close"]) / 4.0
 
