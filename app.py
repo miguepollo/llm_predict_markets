@@ -33,14 +33,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-st.set_page_config(page_title="TimesFM · Moirai · Kronos Price Predictor", layout="wide")
+st.set_page_config(page_title="TimesFM · Moirai · Kronos · Chronos-2 Price Predictor", layout="wide")
 st.title("📈 Foundation-model Price Predictor")
 st.caption(
     "OHLCV candle prediction with Google [TimesFM]"
     "(https://github.com/google-research/timesfm), Salesforce [Moirai]"
-    "(https://github.com/SalesforceAIResearch/uni2ts) or [Kronos]"
-    "(https://github.com/shiyu-coder/Kronos) and Yahoo Finance data. "
-    "For research purposes only — not financial advice."
+    "(https://github.com/SalesforceAIResearch/uni2ts), [Kronos]"
+    "(https://github.com/shiyu-coder/Kronos) or Amazon [Chronos-2]"
+    "(https://github.com/amazon-science/chronos-forecasting) and Yahoo Finance "
+    "data. For research purposes only — not financial advice."
 )
 
 
@@ -51,6 +52,8 @@ def model_label(name: str) -> str:
         return f"TimesFM-{cfg.name} ({cfg.params})"
     if cfg.backend == "kronos":
         return f"Kronos {cfg.name.split('-', 1)[1]} ({cfg.params})"
+    if cfg.backend == "chronos2":
+        return f"Chronos-2 ({cfg.params})"
     # moirai-<size> -> "Moirai <size>"
     size = cfg.name.split("-", 1)[1]
     return f"Moirai {size} ({cfg.params})"
@@ -104,8 +107,8 @@ with st.sidebar:
     device = st.selectbox(
         "Compute device", devices, index=0,
         format_func=device_details,
-        help="TimesFM/Moirai only accelerate on CUDA; XPU/MPS fall back to "
-             "CPU (Kronos can use them). If unsure, use cpu.",
+        help="TimesFM/Moirai/Chronos-2 only accelerate on CUDA; XPU/MPS fall "
+             "back to CPU (Kronos can use them). If unsure, use cpu.",
     )
 
     mode = st.radio("Mode", ["Forecast", "Backtest"], horizontal=True)

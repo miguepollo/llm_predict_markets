@@ -1,6 +1,6 @@
-"""Model registry and predictor loading for TimesFM, Moirai and Kronos.
+"""Model registry and predictor loading for TimesFM, Moirai, Kronos and Chronos-2.
 
-Three time-series foundation models are supported, selected from the UI:
+Four time-series foundation models are supported, selected from the UI:
 
 - **TimesFM 2.5** (``google/timesfm-2.5-200m-pytorch``, 200M, Apache-2.0): a
   univariate point-forecast model. Its ``forecast()`` accepts several series in
@@ -15,6 +15,10 @@ Three time-series foundation models are supported, selected from the UI:
   ``vendor/Kronos`` (no PyPI package). It produces candles by token sampling
   controlled by ``temperature``/``top_p``/``sample_count`` and averages the
   sampled paths into a point forecast.
+- **Chronos-2** (``amazon/chronos-2``, 120M, Apache-2.0, from
+  amazon-science/chronos-forecasting): Amazon's quantile-based encoder-only
+  model. Like Moirai, ``Chronos2Predictor`` feeds the five OHLCV variates as
+  one multivariate target; the 0.5 quantile is the point forecast.
 
 All backends expose the same ``predict(df, x_timestamp, y_timestamp, pred_len,
 verbose, temperature, top_p, sample_count)`` interface and reconcile candle
@@ -50,7 +54,7 @@ VENDOR_KRONOS_PATH = Path(__file__).resolve().parent.parent / "vendor" / "Kronos
 @dataclass(frozen=True)
 class ModelConfig:
     name: str
-    backend: str  # "timesfm" | "moirai" | "kronos"
+    backend: str  # "timesfm" | "moirai" | "kronos" | "chronos2"
     hf_model_id: str
     max_context: int
     max_horizon: int
@@ -135,6 +139,16 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         params="102.3M",
         description="Kronos base (102.3M, Apache-2.0). Generative; best quality, "
                     "slower on CPU.",
+    ),
+    "chronos2": ModelConfig(
+        name="chronos2",
+        backend="chronos2",
+        hf_model_id="amazon/chronos-2",
+        max_context=2048,
+        max_horizon=1024,
+        params="120M",
+        description="Chronos-2 (120M, Apache-2.0, Amazon Science). Quantile-based; "
+                    "all OHLCV variates forecast jointly.",
     ),
 }
 
@@ -437,6 +451,73 @@ def _reconcile_kronos_candles(pred: pd.DataFrame, y_timestamp) -> pd.DataFrame:
     )
 
 
+class Chronos2Predictor:
+    """Wraps Amazon's Chronos-2 pipeline and exposes the app ``predict()``.
+
+    Chronos-2 (``amazon/chronos-2``, 120M, Apache-2.0) is a quantile-based,
+    encoder-only model from the ``chronos-forecasting`` PyPI package. Like
+    Moirai we feed the five OHLCV variates as one multivariate target
+    ``(5, context_length)`` and forecast them jointly; the 0.5 quantile is
+    used as the point forecast and candle geometry is reconciled as a safety
+    net. ``temperature``/``top_p``/``sample_count`` are accepted for a uniform
+    interface but unused (Chronos-2 is quantile-based, not sample-based).
+    """
+
+    def __init__(self, pipeline, max_context: int):
+        self.pipeline = pipeline
+        self.max_context = max_context
+
+    def predict(
+        self,
+        df: pd.DataFrame,
+        x_timestamp: pd.Series,
+        y_timestamp: pd.Series,
+        pred_len: int = 120,
+        verbose: bool = False,
+        temperature: float = 1.0,
+        top_p: float = 0.9,
+        sample_count: int = 1,
+    ) -> pd.DataFrame:
+        if pred_len < 1:
+            raise ValueError(f"pred_len must be >= 1, got {pred_len}.")
+        if len(df) < 2:
+            raise ValueError("At least 2 context candles are required.")
+
+        # One multivariate target: (n_variates=5, history_length).
+        inputs = np.stack(
+            [df[c].to_numpy(dtype=np.float32) for c in OHLCV]
+        )
+        quantiles, _ = self.pipeline.predict_quantiles(
+            inputs=[inputs],
+            prediction_length=int(pred_len),
+            quantile_levels=[0.5],
+        )
+        # quantiles[0] has shape (n_variates, pred_len, len(quantile_levels)).
+        pred = np.asarray(quantiles[0][..., 0], dtype=np.float64)  # (5, pred_len)
+
+        f_open, f_high, f_low, f_close, f_volume = pred
+
+        # Reconcile candle geometry: high/low must enclose the open/close body.
+        high = np.maximum(f_high, np.maximum(f_open, f_close))
+        low = np.minimum(f_low, np.minimum(f_open, f_close))
+        volume = np.maximum(f_volume, 0.0)
+        amount = volume * (f_open + high + low + f_close) / 4.0
+
+        index = pd.DatetimeIndex(y_timestamp)
+        index.name = "timestamps"
+        return pd.DataFrame(
+            {
+                "open": f_open,
+                "high": high,
+                "low": low,
+                "close": f_close,
+                "volume": volume,
+                "amount": amount,
+            },
+            index=index,
+        )
+
+
 def _load_timesfm(cfg: ModelConfig, device: str):
     import timesfm  # noqa: PLC0415
 
@@ -488,13 +569,21 @@ def _load_kronos(cfg: ModelConfig, device: str):
     return KronosPredictor(predictor, max_context=cfg.max_context)
 
 
-@lru_cache(maxsize=6)
+def _load_chronos2(cfg: ModelConfig, device: str):
+    from chronos import Chronos2Pipeline
+
+    kwargs = {"device_map": device} if device != "cpu" else {}
+    pipeline = Chronos2Pipeline.from_pretrained(cfg.hf_model_id, **kwargs)
+    return Chronos2Predictor(pipeline, max_context=cfg.max_context)
+
+
+@lru_cache(maxsize=8)
 def load_predictor(model_name: str = DEFAULT_MODEL, device: str = "cpu"):
     """Loads (cached) the selected model's predictor.
 
-    Dispatches to TimesFM, Moirai or Kronos based on the registry backend.
-    The first call downloads the weights from HuggingFace; subsequent calls
-    reuse it.
+    Dispatches to TimesFM, Moirai, Kronos or Chronos-2 based on the registry
+    backend. The first call downloads the weights from HuggingFace; subsequent
+    calls reuse it.
     """
     if model_name not in MODEL_REGISTRY:
         raise ValueError(
@@ -520,6 +609,8 @@ def load_predictor(model_name: str = DEFAULT_MODEL, device: str = "cpu"):
         predictor = _load_moirai(cfg, device)
     elif cfg.backend == "kronos":
         predictor = _load_kronos(cfg, device)
+    elif cfg.backend == "chronos2":
+        predictor = _load_chronos2(cfg, device)
     else:
         raise ValueError(f"Unknown backend: {cfg.backend!r} for {model_name!r}.")
     logger.info(

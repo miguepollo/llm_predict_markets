@@ -1,15 +1,20 @@
-"""Unit tests for the model registry and the TimesFM/Moirai/Kronos predictors.
+"""Unit tests for the model registry and the predictors.
 
 These tests neither download weights nor hit the network: TimesFM is exercised
-through a fake model, Kronos through a fake vendored predictor, and the
-registry is checked for all three backends.
+through a fake model, Kronos and Chronos-2 through fake vendored predictors,
+and the registry is checked for all four backends.
 """
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from src.models import MODEL_REGISTRY, KronosPredictor, TimesFMPredictor
+from src.models import (
+    MODEL_REGISTRY,
+    Chronos2Predictor,
+    KronosPredictor,
+    TimesFMPredictor,
+)
 
 OHLCV_COLS = ["open", "high", "low", "close", "volume", "amount"]
 
@@ -57,15 +62,18 @@ def test_timesfm_predictor_candles():
 
 def test_registry_has_all_backends():
     backends = {cfg.backend for cfg in MODEL_REGISTRY.values()}
-    assert backends == {"timesfm", "moirai", "kronos"}
+    assert backends == {"timesfm", "moirai", "kronos", "chronos2"}
     assert "2.5" in MODEL_REGISTRY
     assert "moirai-small" in MODEL_REGISTRY
     assert "moirai-base" in MODEL_REGISTRY
     assert "kronos-mini" in MODEL_REGISTRY
     assert "kronos-small" in MODEL_REGISTRY
     assert "kronos-base" in MODEL_REGISTRY
+    assert "chronos2" in MODEL_REGISTRY
     assert MODEL_REGISTRY["2.5"].backend == "timesfm"
     assert MODEL_REGISTRY["kronos-small"].backend == "kronos"
+    assert MODEL_REGISTRY["chronos2"].backend == "chronos2"
+    assert MODEL_REGISTRY["chronos2"].hf_model_id == "amazon/chronos-2"
 
 
 class _FakeKronosPredictor:
@@ -91,6 +99,53 @@ def test_kronos_predictor_reconciles_candles():
     y_timestamp = pd.date_range("2024-01-02", periods=5, freq="1h")
     out = p.predict(_frame(8), x_timestamp, y_timestamp, pred_len=5,
                     temperature=1.0, top_p=0.9, sample_count=3)
+
+    assert list(out.columns) == OHLCV_COLS
+    assert len(out) == 5
+    assert isinstance(out.index, pd.DatetimeIndex)
+    # Candle geometry is reconciled.
+    assert (out["high"] >= out["open"]).all()
+    assert (out["high"] >= out["close"]).all()
+    assert (out["low"] <= out["open"]).all()
+    assert (out["low"] <= out["close"]).all()
+    assert (out["volume"] >= 0).all()
+
+
+class _FakeChronos2Pipeline:
+    """Mimics ``chronos.Chronos2Pipeline.predict_quantiles``.
+
+    Returns deliberately broken candle geometry (high below open, low above
+    close, negative volume) so the wrapper must reconcile it.
+    """
+
+    def predict_quantiles(self, inputs, prediction_length, quantile_levels):
+        series = inputs[0]  # (n_variates, history_length)
+        n_variates, h = series.shape[0], prediction_length
+        t = np.arange(h, dtype=np.float64)
+        rows = []
+        for i in range(n_variates):
+            b = float(series[i, -1])
+            if i == 0:      # open
+                rows.append(b + t)
+            elif i == 1:    # high (too low -> must be pushed up)
+                rows.append(b * 0.5 + t)
+            elif i == 2:    # low (too high -> must be pushed down)
+                rows.append(b * 2.0 + t)
+            elif i == 3:    # close
+                rows.append(b + t + 1.0)
+            else:           # volume (negative -> clamped to 0)
+                rows.append(np.full(h, -3.0))
+        out = np.stack(rows)  # (n_variates, h)
+        quantiles = np.repeat(out[:, :, None], len(quantile_levels), axis=2)
+        mean = out
+        return [quantiles], [mean]
+
+
+def test_chronos2_predictor_reconciles_candles():
+    p = Chronos2Predictor(_FakeChronos2Pipeline(), max_context=2048)
+    x_timestamp = pd.date_range("2024-01-01", periods=8, freq="1h")
+    y_timestamp = pd.date_range("2024-01-02", periods=5, freq="1h")
+    out = p.predict(_frame(8), x_timestamp, y_timestamp, pred_len=5)
 
     assert list(out.columns) == OHLCV_COLS
     assert len(out) == 5

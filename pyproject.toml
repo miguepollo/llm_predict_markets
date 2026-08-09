@@ -1,7 +1,7 @@
 [project]
 name = "timesfm-predict"
 version = "0.3.0"
-description = "Price prediction with TimesFM, Moirai and Kronos (time-series foundation models) + Yahoo Finance"
+description = "Price prediction with TimesFM, Moirai, Kronos and Chronos-2 (time-series foundation models) + Yahoo Finance"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "numpy",
@@ -10,6 +10,8 @@ dependencies = [
     "einops==0.7.0",
     "timesfm>=2.0.2,<3",
     "uni2ts>=2.0,<3",
+    "chronos-forecasting>=2.0,<3",
+    "transformers>=4.41,<5",  # chronos-forecasting allows v5, but v5 needs torch>=2.5
     "huggingface_hub>=0.33,<2.0",
     "safetensors>=0.6",
     "tqdm>=4.67",
