@@ -107,8 +107,9 @@ with st.sidebar:
     device = st.selectbox(
         "Compute device", devices, index=0,
         format_func=device_details,
-        help="TimesFM/Moirai/Chronos-2 only accelerate on CUDA; XPU/MPS fall "
-             "back to CPU (Kronos can use them). If unsure, use cpu.",
+        help="TimesFM/Moirai/Chronos-2 accelerate on CUDA/HIP (NVIDIA GPU, or "
+             "AMD GPU when torch is the ROCm build); XPU/MPS fall back to CPU "
+             "(Kronos can use them). If unsure, use cpu.",
     )
 
     mode = st.radio("Mode", ["Forecast", "Backtest"], horizontal=True)

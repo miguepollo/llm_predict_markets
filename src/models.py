@@ -155,6 +155,22 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 DEFAULT_MODEL = "moirai-base"
 
 
+def is_amd_rocm() -> bool:
+    """True when torch is built for AMD GPUs (ROCm/HIP backend).
+
+    A ROCm build of torch exposes AMD Radeon / Instinct cards through the same
+    CUDA API as NVIDIA (``torch.cuda.is_available()`` is True and the ``cuda``
+    device string works). The ``torch.version.hip`` attribute is set only on
+    ROCm builds and is what distinguishes an AMD GPU from an NVIDIA CUDA one.
+    """
+    try:
+        import torch
+
+        return bool(getattr(torch.version, "hip", None))
+    except Exception:
+        return False
+
+
 def device_details(device: str) -> str:
     """Human-readable description of a compute device (hardware, driver)."""
     try:
@@ -163,7 +179,10 @@ def device_details(device: str) -> str:
         if device == "cpu":
             return f"CPU ({torch.get_num_threads()} torch threads)"
         if device == "cuda":
-            return f"NVIDIA GPU (CUDA): {torch.cuda.get_device_name(0)}"
+            name = torch.cuda.get_device_name(0)
+            if is_amd_rocm():
+                return f"AMD GPU (ROCm/HIP): {name}"
+            return f"NVIDIA GPU (CUDA): {name}"
         if device == "xpu":
             try:
                 props = torch.xpu.get_device_properties(0)
@@ -185,15 +204,19 @@ def available_devices() -> list[str]:
     """Compute devices available in this environment.
 
     - ``cpu``: always available.
-    - ``cuda``: NVIDIA GPU (torch with CUDA).
+    - ``cuda``: a CUDA-capable NVIDIA GPU (torch built with CUDA) **or** an AMD
+      Radeon / Instinct GPU (torch built with ROCm/HIP). A ROCm build exposes
+      AMD through the same ``cuda`` device string, so ``cuda`` covers both —
+      ``torch.version.hip`` tells them apart (see :func:`is_amd_rocm`).
     - ``xpu``: Intel GPU (Arc / Iris Xe) via torch XPU backend. On Linux
       requires a torch XPU build (download.pytorch.org/whl/xpu) and,
       depending on the GPU, intel-extension-for-pytorch.
     - ``mps``: Apple Silicon.
 
-    Note: TimesFM 2.5 / Moirai torch inference only accelerates on CUDA and
-    falls back to CPU otherwise, so the UI only offers ``cpu``/``cuda``. Kronos
-    can also use XPU/MPS when present.
+    Note: TimesFM 2.5 / Moirai torch inference only accelerates on a CUDA/HIP
+    GPU and falls back to CPU otherwise, so the UI only offers ``cpu``/``cuda``
+    (on a ROCm build that ``cuda`` entry runs on the AMD GPU). Kronos can also
+    use XPU/MPS when present.
     """
     devices = ["cpu"]
     try:

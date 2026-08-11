@@ -55,8 +55,11 @@ trading.
   `kronos-mini`/`small`/`base` (max_context 2048/512/512) and `chronos2`
   (max_context=2048, max_horizon=1024). TimesFM patches context in windows of
   32, so the lookback slider uses multiples of 32.
-- **Devices**: CPU by default; CUDA if available. TimesFM/Moirai/Chronos-2
-  torch inference only accelerates on CUDA, so the UI offers only cpu/cuda.
+- **Devices**: CPU by default; GPU if a CUDA (NVIDIA) or ROCm/HIP (AMD)
+  torch build is installed. TimesFM/Moirai/Chronos-2 torch inference only
+  accelerates on CUDA/HIP, so the UI offers only cpu/cuda — on a ROCm build the
+  `cuda` entry runs on the AMD GPU and `device_details("cuda")` labels it
+  "AMD GPU (ROCm/HIP)" (via `is_amd_rocm()`/`torch.version.hip`).
   `available_devices()` also reports xpu/mps (used by Kronos) and
   `device_details()` knows all names.
 - **Logging**: `logging` INFO messages at startup/model init (`src/models.py`,

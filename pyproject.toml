@@ -39,3 +39,23 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu124" }
+
+# AMD GPU build of torch (ROCm/HIP). A ROCm build surfaces the AMD card through
+# the same "cuda" device string, so no code change is needed — the app labels
+# it "AMD GPU (ROCm/HIP)". To install for AMD, comment out the CUDA index/src
+# above and uncomment ONE of the blocks below matching your card, then:
+#   uv sync --python 3.11 --reinstall-package torch
+#
+#   [[tool.uv.index]]
+#   name = "pytorch-rocm56"        # RX 480/470/570/580 (Polaris, gfx803), Vega 56/64
+#   url = "https://download.pytorch.org/whl/rocm5.6"
+#   explicit = true
+#
+#   [[tool.uv.index]]
+#   name = "pytorch-rocm62"        # RX 6000/7000, Instinct MI200/MI300, Vega 20+
+#   url = "https://download.pytorch.org/whl/rocm6.2"
+#   explicit = true
+#
+#   [tool.uv.sources]
+#   torch = { index = "pytorch-rocm56" }
+
