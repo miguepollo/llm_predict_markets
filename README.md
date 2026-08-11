@@ -100,7 +100,7 @@ All parameters are set in the sidebar:
 | Parameter | What it does |
 |---|---|
 | **Foundation model** | `TimesFM-2.5` (point forecast), `Moirai small/base/large` (probabilistic + true multivariate), `Kronos mini/small/base` (generative) or `Chronos-2` (quantile-based, Amazon). Default: `moirai-base`. |
-| **Compute device** | `cpu` or `cuda`. `cuda` targets an NVIDIA (CUDA) GPU — TimesFM/Moirai/Chronos-2 accelerate on it; XPU/MPS fall back to CPU (Kronos can use them). |
+| **Compute device** | Auto-detected from torch and offered in the sidebar: `cpu`, `cuda` (NVIDIA GPU), `xpu` (Intel GPU) and `mps` (Apple Silicon). TimesFM/Moirai/Chronos-2 only accelerate on `cuda` and fall back to CPU otherwise; **Kronos can also use `xpu`/`mps`**. |
 | **Mode** | `Forecast`: predicts the next N candles into the future. `Backtest`: predicts a known historical window and compares it against reality with metrics (MAE, RMSE, MAPE, directional accuracy) — use this to judge whether the model works for your ticker/timeframe before trusting a forecast. |
 | **Lookback** | Number of past candles fed as context (multiples of 32; up to 1024 for TimesFM, 512 for Moirai, 2048 for Kronos-mini/Chronos-2). More context = more information, but slower. |
 | **Candles to predict / Backtest candles** | Prediction horizon (`pred_len`, max 240): how many candles the model generates. Longer horizons are slower and less reliable. |
@@ -111,40 +111,31 @@ All parameters are set in the sidebar:
 ## Hardware acceleration
 
 The app picks the compute device from the sidebar ("Compute device"). The list
-is auto-detected from torch and limited to `cpu` and `cuda`, because the models'
-torch inference only runs natively on those. `cuda` runs on an NVIDIA GPU when
-torch is built with CUDA.
+is auto-detected from torch: `cpu` is always available, plus `cuda` (NVIDIA
+GPU), `xpu` (Intel GPU) and `mps` (Apple Silicon) when the installed torch
+exposes them. Because TimesFM / Moirai / Chronos-2 torch inference only
+accelerates on CUDA, selecting `xpu`/`mps` with those backends falls back to
+CPU; **Kronos is the only backend that can run natively on Intel XPU / Apple
+MPS**.
 
-By default `pyproject.toml` pins a **CPU-only** torch build:
+By default `pyproject.toml` uses a **CPU-only torch** build from PyPI; the CUDA
+index in that file is commented out, so no GPU support is installed.
+
+### NVIDIA GPU (CUDA)
+
+To accelerate inference on an **NVIDIA GPU**, uncomment the CUDA block in
+`pyproject.toml` and recreate the environment. Choose the CUDA version that
+matches your driver (see `nvidia-smi`); `cu124` is a safe default for recent
+NVIDIA drivers and works with the torch `<2.5` pin used here:
 
 ```toml
 [[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-```
-
-To accelerate inference on an **NVIDIA GPU**, replace that CPU wheel with a CUDA
-build. Pick **one** of the two options below, then re-verify:
-
-```bash
-uv run python -c "import torch; print(torch.version.cuda, torch.cuda.is_available())"
-```
-
-You should see your CUDA version (e.g. `cu124`) and `True`.
-
-### Option A — persistent (recommended)
-
-Change the `url` in `pyproject.toml` to the CUDA wheel index. Choose the CUDA
-version that matches your driver (see `nvidia-smi`); `cu124` is a safe default
-for recent NVIDIA drivers and works with the torch `<2.5` pin used here:
-
-```toml
-# Instead of https://download.pytorch.org/whl/cpu
-url = "https://download.pytorch.org/whl/cu124"
+torch = { index = "pytorch-cu124" }
 ```
 
 Then recreate the environment (this recompiles torch):
@@ -153,17 +144,13 @@ Then recreate the environment (this recompiles torch):
 uv sync --python 3.11 --reinstall-package torch
 ```
 
-### Option B — one-off (no file changes)
-
-Install just torch from the CUDA index with `uv pip install`:
+Verify that CUDA is active:
 
 ```bash
-uv pip install --python 3.11 torch --index-url https://download.pytorch.org/whl/cu124
+uv run python -c "import torch; print(torch.version.cuda, torch.cuda.is_available())"
 ```
 
-> **Note:** this only swaps the current environment; the next `uv sync` will
-> restore the CPU-only build defined in `pyproject.toml` unless you also apply
-> Option A (or `uv sync` again with `--reinstall-package torch`).
+You should see your CUDA version (e.g. `cu124`) and `True`.
 
 ### Which CUDA wheel to pick
 
@@ -174,8 +161,62 @@ uv pip install --python 3.11 torch --index-url https://download.pytorch.org/whl/
 | `cu124` | ~550.54 | recommended default |
 
 Your concrete CUDA architecture/driver is shown by `nvidia-smi`. TimesFM, Moirai
-and Chronos-2 then run inference on the GPU and the sidebar will offer `cuda`
-(Kronos can also use Intel GPU / Apple Silicon, if torch is built for those).
+and Chronos-2 then run inference on the GPU and the sidebar will offer `cuda`.
+
+### Intel GPU (Arc, Iris Xe, Core Ultra iGPU) — XPU backend
+
+PyTorch ships an **XPU** backend for Intel GPUs. Only **Kronos** uses XPU in
+this app (TimesFM / Moirai / Chronos-2 fall back to CPU on it). To enable it:
+
+1. **Install the Intel GPU compute runtime** (Ubuntu example):
+
+   ```bash
+   sudo apt install intel-opencl-icd libze1
+   ```
+
+   Other distros: https://www.intel.com/content/www/us/en/docs/oneapi/installation-guide-linux/
+
+2. **Switch torch from the CPU build to the XPU build** in `pyproject.toml`:
+
+   ```toml
+   [[tool.uv.index]]
+   name = "pytorch-xpu"
+   url = "https://download.pytorch.org/whl/xpu"
+   explicit = true
+
+   [tool.uv.sources]
+   torch = { index = "pytorch-xpu" }
+   ```
+
+   Then `uv sync --python 3.11 --reinstall-package torch`.
+
+3. **(Optional)** Install Intel Extension for PyTorch for extra optimized ops:
+
+   ```bash
+   uv pip install intel-extension-for-pytorch
+   ```
+
+4. **Verify** the XPU backend is detected, then launch the app and select `xpu`
+   in the sidebar (with a **Kronos** model):
+
+   ```bash
+   uv run python -c "import torch; print(torch.xpu.is_available(), torch.xpu.get_device_name(0))"
+   uv run streamlit run app.py
+   ```
+
+Please note that CPU-only / CUDA torch builds have no XPU support, and Intel
+Arc / Iris Xe / Core Ultra iGPUs have the best XPU coverage.
+
+### Intel NPU (AI Boost, Core Ultra) — not plug-and-play
+
+PyTorch has **no native NPU backend**; Intel NPUs are reached through
+**OpenVINO**. Kronos is a custom autoregressive model (a Python sampling loop
+with dynamic shapes), so it does not run on the NPU out of the box. A real
+setup would require exporting the Kronos tokenizer and transformer to OpenVINO
+IR (via `optimum-intel` / `ovc`), or wrapping single-step forwards with
+`torch.compile(model, backend="openvino")`. This is experimental and not wired
+into this app. For faster inference today, use an Intel GPU via XPU (above) or
+an NVIDIA GPU via CUDA.
 
 ## Tests
 

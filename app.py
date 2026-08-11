@@ -103,12 +103,13 @@ with st.sidebar:
     cfg = MODEL_REGISTRY[model_name]
     st.caption(cfg.description)
 
-    devices = [d for d in get_available_devices() if d in ("cpu", "cuda")]
+    devices = get_available_devices()
     device = st.selectbox(
         "Compute device", devices, index=0,
         format_func=device_details,
         help="TimesFM/Moirai/Chronos-2 accelerate on a CUDA (NVIDIA) GPU; "
-             "XPU/MPS fall back to CPU (Kronos can use them). If unsure, use cpu.",
+             "XPU (Intel GPU)/MPS fall back to CPU for them, but Kronos can "
+             "use XPU natively. If unsure, use cpu.",
     )
 
     mode = st.radio("Mode", ["Forecast", "Backtest"], horizontal=True)

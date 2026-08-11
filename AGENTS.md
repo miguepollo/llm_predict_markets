@@ -65,9 +65,11 @@ trading.
   (max_context=2048, max_horizon=1024). TimesFM patches context in windows of
   32, so the lookback slider uses multiples of 32.
 - **Devices**: CPU by default; GPU if a CUDA (NVIDIA) torch build is installed.
-  TimesFM/Moirai/Chronos-2 torch inference only accelerates on CUDA, so the UI
-  offers only cpu/cuda. `available_devices()` also reports xpu/mps (used by
-  Kronos) and `device_details()` knows all names.
+  The UI offers whatever `available_devices()` detects — `cpu`, `cuda`, `xpu`
+  (Intel GPU) and `mps` (Apple Silicon). TimesFM/Moirai/Chronos-2 torch inference
+  only accelerates on CUDA, so `effective_device()` makes them fall back to CPU
+  on `xpu`/`mps`; only Kronos can run on XPU/MPS natively. `device_details()`
+  knows all names.
 - **Logging**: `logging` INFO messages at startup/model init (`src/models.py`,
   `app.py`) report the torch build and the selected device/model.
 - **Data format**: `src/data.py` normalizes yfinance to

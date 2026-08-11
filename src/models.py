@@ -192,9 +192,10 @@ def available_devices() -> list[str]:
       depending on the GPU, intel-extension-for-pytorch.
     - ``mps``: Apple Silicon.
 
-    Note: TimesFM 2.5 / Moirai torch inference only accelerates on a CUDA GPU
-    and falls back to CPU otherwise, so the UI only offers ``cpu``/``cuda``.
-    Kronos can also use XPU/MPS when present.
+    Note: TimesFM / Moirai / Chronos-2 torch inference only accelerates on a
+    CUDA GPU and falls back to CPU otherwise; Kronos can additionally use XPU
+    or MPS when present (see :func:`effective_device`). The UI offers whatever
+    this function detects.
     """
     devices = ["cpu"]
     try:
@@ -547,6 +548,25 @@ def _load_chronos2(cfg: ModelConfig, device: str):
     return Chronos2Predictor(pipeline, max_context=cfg.max_context)
 
 
+# Devices that only Kronos can consume natively. The torch-based backends
+# (TimesFM / Moirai / Chronos-2) have no accelerated path on an Intel XPU or
+# Apple MPS device, so they must fall back to CPU (Kronos runs on those).
+_KRONOS_ONLY_DEVICES = frozenset({"xpu", "mps"})
+
+
+def effective_device(backend: str, device: str) -> str:
+    """Returns the device a backend should actually run on.
+
+    ``xpu`` (Intel GPU) / ``mps`` (Apple Silicon) only have a working path in
+    Kronos; TimesFM, Moirai and Chronos-2 fall back to ``cpu`` on them (their
+    torch inference only accelerates on CUDA). ``cpu`` and ``cuda`` always pass
+    through unchanged.
+    """
+    if backend != "kronos" and device in _KRONOS_ONLY_DEVICES:
+        return "cpu"
+    return device
+
+
 @lru_cache(maxsize=8)
 def load_predictor(model_name: str = DEFAULT_MODEL, device: str = "cpu"):
     """Loads (cached) the selected model's predictor.
@@ -561,6 +581,14 @@ def load_predictor(model_name: str = DEFAULT_MODEL, device: str = "cpu"):
             f"Available: {sorted(MODEL_REGISTRY)}"
         )
     cfg = MODEL_REGISTRY[model_name]
+
+    requested = device
+    device = effective_device(cfg.backend, device)
+    if device != requested:
+        logger.warning(
+            "%s has no %s path; falling back to %s.",
+            cfg.backend, requested, device,
+        )
 
     import torch
 
