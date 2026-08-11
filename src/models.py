@@ -155,22 +155,6 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 DEFAULT_MODEL = "moirai-base"
 
 
-def is_amd_rocm() -> bool:
-    """True when torch is built for AMD GPUs (ROCm/HIP backend).
-
-    A ROCm build of torch exposes AMD Radeon / Instinct cards through the same
-    CUDA API as NVIDIA (``torch.cuda.is_available()`` is True and the ``cuda``
-    device string works). The ``torch.version.hip`` attribute is set only on
-    ROCm builds and is what distinguishes an AMD GPU from an NVIDIA CUDA one.
-    """
-    try:
-        import torch
-
-        return bool(getattr(torch.version, "hip", None))
-    except Exception:
-        return False
-
-
 def device_details(device: str) -> str:
     """Human-readable description of a compute device (hardware, driver)."""
     try:
@@ -180,8 +164,6 @@ def device_details(device: str) -> str:
             return f"CPU ({torch.get_num_threads()} torch threads)"
         if device == "cuda":
             name = torch.cuda.get_device_name(0)
-            if is_amd_rocm():
-                return f"AMD GPU (ROCm/HIP): {name}"
             return f"NVIDIA GPU (CUDA): {name}"
         if device == "xpu":
             try:
@@ -204,19 +186,15 @@ def available_devices() -> list[str]:
     """Compute devices available in this environment.
 
     - ``cpu``: always available.
-    - ``cuda``: a CUDA-capable NVIDIA GPU (torch built with CUDA) **or** an AMD
-      Radeon / Instinct GPU (torch built with ROCm/HIP). A ROCm build exposes
-      AMD through the same ``cuda`` device string, so ``cuda`` covers both —
-      ``torch.version.hip`` tells them apart (see :func:`is_amd_rocm`).
+    - ``cuda``: a CUDA-capable NVIDIA GPU (torch built with CUDA).
     - ``xpu``: Intel GPU (Arc / Iris Xe) via torch XPU backend. On Linux
       requires a torch XPU build (download.pytorch.org/whl/xpu) and,
       depending on the GPU, intel-extension-for-pytorch.
     - ``mps``: Apple Silicon.
 
-    Note: TimesFM 2.5 / Moirai torch inference only accelerates on a CUDA/HIP
-    GPU and falls back to CPU otherwise, so the UI only offers ``cpu``/``cuda``
-    (on a ROCm build that ``cuda`` entry runs on the AMD GPU). Kronos can also
-    use XPU/MPS when present.
+    Note: TimesFM 2.5 / Moirai torch inference only accelerates on a CUDA GPU
+    and falls back to CPU otherwise, so the UI only offers ``cpu``/``cuda``.
+    Kronos can also use XPU/MPS when present.
     """
     devices = ["cpu"]
     try:
@@ -235,6 +213,41 @@ def available_devices() -> list[str]:
         {d: device_details(d) for d in devices},
     )
     return devices
+
+
+def _build_candles(
+    f_open: np.ndarray,
+    f_high: np.ndarray,
+    f_low: np.ndarray,
+    f_close: np.ndarray,
+    f_volume: np.ndarray,
+    y_timestamp,
+) -> pd.DataFrame:
+    """Reconciles candle geometry and returns the app schema DataFrame.
+
+    Ensures ``high >= max(open, close)``, ``low <= min(open, close)`` and
+    ``volume >= 0``, and computes ``amount = volume * mean price``. The result
+    is indexed by the future ``y_timestamp`` with columns
+    ``open, high, low, close, volume, amount``.
+    """
+    high = np.maximum(f_high, np.maximum(f_open, f_close))
+    low = np.minimum(f_low, np.minimum(f_open, f_close))
+    volume = np.maximum(f_volume, 0.0)
+    amount = volume * (f_open + high + low + f_close) / 4.0
+
+    index = pd.DatetimeIndex(y_timestamp)
+    index.name = "timestamps"
+    return pd.DataFrame(
+        {
+            "open": f_open,
+            "high": high,
+            "low": low,
+            "close": f_close,
+            "volume": volume,
+            "amount": amount,
+        },
+        index=index,
+    )
 
 
 class TimesFMPredictor:
@@ -288,26 +301,7 @@ class TimesFMPredictor:
         pred = np.asarray(point, dtype=np.float64)  # shape (5, pred_len)
 
         f_open, f_high, f_low, f_close, f_volume = pred
-
-        # Reconcile candle geometry: high/low must enclose the open/close body.
-        high = np.maximum(f_high, np.maximum(f_open, f_close))
-        low = np.minimum(f_low, np.minimum(f_open, f_close))
-        volume = np.maximum(f_volume, 0.0)
-        amount = volume * (f_open + high + low + f_close) / 4.0
-
-        index = pd.DatetimeIndex(y_timestamp)
-        index.name = "timestamps"
-        return pd.DataFrame(
-            {
-                "open": f_open,
-                "high": high,
-                "low": low,
-                "close": f_close,
-                "volume": volume,
-                "amount": amount,
-            },
-            index=index,
-        )
+        return _build_candles(f_open, f_high, f_low, f_close, f_volume, y_timestamp)
 
 
 class MoiraiPredictor:
@@ -368,18 +362,7 @@ class MoiraiPredictor:
         f_close = median[:, 3]
         f_volume = median[:, 4]
 
-        high = np.maximum(f_high, np.maximum(f_open, f_close))
-        low = np.minimum(f_low, np.minimum(f_open, f_close))
-        volume = np.maximum(f_volume, 0.0)
-        amount = volume * (f_open + high + low + f_close) / 4.0
-
-        index = pd.DatetimeIndex(y_timestamp)
-        index.name = "timestamps"
-        return pd.DataFrame(
-            {"open": f_open, "high": high, "low": low, "close": f_close,
-             "volume": volume, "amount": amount},
-            index=index,
-        )
+        return _build_candles(f_open, f_high, f_low, f_close, f_volume, y_timestamp)
 
 
 def _ensure_kronos_importable() -> None:
@@ -454,24 +437,7 @@ def _reconcile_kronos_candles(pred: pd.DataFrame, y_timestamp) -> pd.DataFrame:
     low = out["low"].to_numpy(dtype=np.float64)
     volume = out["volume"].to_numpy(dtype=np.float64)
 
-    high = np.maximum(high, np.maximum(open_, close))
-    low = np.minimum(low, np.minimum(open_, close))
-    volume = np.maximum(volume, 0.0)
-    amount = volume * (open_ + high + low + close) / 4.0
-
-    index = pd.DatetimeIndex(y_timestamp)
-    index.name = "timestamps"
-    return pd.DataFrame(
-        {
-            "open": open_,
-            "high": high,
-            "low": low,
-            "close": close,
-            "volume": volume,
-            "amount": amount,
-        },
-        index=index,
-    )
+    return _build_candles(open_, high, low, close, volume, y_timestamp)
 
 
 class Chronos2Predictor:
@@ -519,26 +485,7 @@ class Chronos2Predictor:
         pred = np.asarray(quantiles[0][..., 0], dtype=np.float64)  # (5, pred_len)
 
         f_open, f_high, f_low, f_close, f_volume = pred
-
-        # Reconcile candle geometry: high/low must enclose the open/close body.
-        high = np.maximum(f_high, np.maximum(f_open, f_close))
-        low = np.minimum(f_low, np.minimum(f_open, f_close))
-        volume = np.maximum(f_volume, 0.0)
-        amount = volume * (f_open + high + low + f_close) / 4.0
-
-        index = pd.DatetimeIndex(y_timestamp)
-        index.name = "timestamps"
-        return pd.DataFrame(
-            {
-                "open": f_open,
-                "high": high,
-                "low": low,
-                "close": f_close,
-                "volume": volume,
-                "amount": amount,
-            },
-            index=index,
-        )
+        return _build_candles(f_open, f_high, f_low, f_close, f_volume, y_timestamp)
 
 
 def _load_timesfm(cfg: ModelConfig, device: str):

@@ -24,9 +24,8 @@ Salesforce's [**Moirai**](https://github.com/SalesforceAIResearch/uni2ts)
 - **Backtest mode**: predicts a known historical window and compares it against
   reality (MAE, RMSE, MAPE, directional accuracy, actual vs predicted chart).
 - Interactive candlestick charts (Plotly) and CSV export.
-- Runs on **CPU** by default; **NVIDIA GPU (CUDA)** or **AMD GPU (ROCm/HIP)**
-  supported if torch is built for the GPU. Selectable in the sidebar
-  ("Compute device").
+- Runs on **CPU** by default; **NVIDIA GPU (CUDA)** supported if torch is built
+  for the GPU. Selectable in the sidebar ("Compute device").
 
 ## How prediction works
 
@@ -101,7 +100,7 @@ All parameters are set in the sidebar:
 | Parameter | What it does |
 |---|---|
 | **Foundation model** | `TimesFM-2.5` (point forecast), `Moirai small/base/large` (probabilistic + true multivariate), `Kronos mini/small/base` (generative) or `Chronos-2` (quantile-based, Amazon). Default: `moirai-base`. |
-| **Compute device** | `cpu` or `cuda`. `cuda` covers both NVIDIA (CUDA) and AMD (ROCm/HIP) GPUs — TimesFM/Moirai/Chronos-2 accelerate on them; XPU/MPS fall back to CPU (Kronos can use them). |
+| **Compute device** | `cpu` or `cuda`. `cuda` targets an NVIDIA (CUDA) GPU — TimesFM/Moirai/Chronos-2 accelerate on it; XPU/MPS fall back to CPU (Kronos can use them). |
 | **Mode** | `Forecast`: predicts the next N candles into the future. `Backtest`: predicts a known historical window and compares it against reality with metrics (MAE, RMSE, MAPE, directional accuracy) — use this to judge whether the model works for your ticker/timeframe before trusting a forecast. |
 | **Lookback** | Number of past candles fed as context (multiples of 32; up to 1024 for TimesFM, 512 for Moirai, 2048 for Kronos-mini/Chronos-2). More context = more information, but slower. |
 | **Candles to predict / Backtest candles** | Prediction horizon (`pred_len`, max 240): how many candles the model generates. Longer horizons are slower and less reliable. |
@@ -113,10 +112,8 @@ All parameters are set in the sidebar:
 
 The app picks the compute device from the sidebar ("Compute device"). The list
 is auto-detected from torch and limited to `cpu` and `cuda`, because the models'
-torch inference only runs natively on those. `cuda` covers **both** NVIDIA
-(CUDA) and AMD (ROCm/HIP) GPUs — a ROCm build of torch surfaces the AMD card
-through the same `cuda` device string, and the app then labels it
-"AMD GPU (ROCm/HIP)" in the selector.
+torch inference only runs natively on those. `cuda` runs on an NVIDIA GPU when
+torch is built with CUDA.
 
 By default `pyproject.toml` pins a **CPU-only** torch build:
 
@@ -179,69 +176,6 @@ uv pip install --python 3.11 torch --index-url https://download.pytorch.org/whl/
 Your concrete CUDA architecture/driver is shown by `nvidia-smi`. TimesFM, Moirai
 and Chronos-2 then run inference on the GPU and the sidebar will offer `cuda`
 (Kronos can also use Intel GPU / Apple Silicon, if torch is built for those).
-
-### AMD GPU (ROCm/HIP)
-
-AMD Radeon / Instinct GPUs are supported through PyTorch's **ROCm** build. A
-ROCm build surfaces the AMD card through the **same `cuda` device string** used
-for NVIDIA (`torch.cuda.is_available()` returns `True`), so **no app change is
-needed** — the sidebar's `cuda` option just runs on the AMD GPU, and the app
-labels it `AMD GPU (ROCm/HIP)` (it detects the ROCm build via
-`torch.version.hip`).
-
-Install the ROCm wheel that matches your card. In `pyproject.toml`, comment out
-the CUDA index/`[tool.uv.sources]` block above and uncomment **one** ROCm wheel
-index:
-
-```toml
-# RX 480/470/570/580 (Polaris, gfx803) — see note below
-[[tool.uv.index]]
-name = "pytorch-rocm56"
-url = "https://download.pytorch.org/whl/rocm5.6"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-rocm56" }
-```
-
-For newer cards use `https://download.pytorch.org/whl/rocm6.2` instead
-(`pytorch-rocm62`).
-
-| PyTorch ROCm wheel | AMD cards | Notes |
-|---|---|---|
-| `rocm5.6` | **RX 480/470/570/580** (Polaris, gfx803), Vega 56/64 | last ROCm to support Polaris; works with the torch `<2.5` pin here |
-| `rocm6.2` | RX 6000/7000, Instinct MI200/MI300, Vega 20+ | new cards; older GCN (Polaris/RX 580) not detected |
-
-> **RX 580 note:** ROCm dropped the Polaris/`gfx803` architecture after 5.6, so
-> an RX 580 needs the **`rocm5.6`** wheel above — a ROCm 6.x build won't detect
-> it. This still fits the app's torch `<2.5` pin.
-
-**Linux driver requirements.** On Linux you also need the AMD ROCm runtime and
-an `amdgpu` driver. The easiest path is AMD's `amdgpu-install` (see the ROCm
-installation guide at https://rocm.docs.amd.com). `rocm-smi` (the AMD equivalent
-of `nvidia-smi`) then shows the card, e.g.:
-
-```bash
-rocm-smi --showproductname
-```
-
-<details>
-<summary>Windows / macOS note</summary>
-
-ROCm is **Linux-first**. On Windows, AMD GPU support in PyTorch is experimental
-and, critically, the old Polaris cards (RX 480/470/570/580) are **not** supported
-on Windows at all — for an RX 580 use Linux. On macOS there is no AMD ROCm path;
-Apple-silicon Macs use the `mps` backend instead (Kronos only).
-</details>
-
-**Verify the install and run the app:**
-
-```bash
-uv sync --python 3.11 --reinstall-package torch
-uv run python -c "import torch; print(torch.version.hip, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
-# expect e.g.: 5.6 True AMD Radeon RX 580
-uv run streamlit run app.py   # sidebar -> Compute device -> cuda ("AMD GPU (ROCm/HIP)")
-```
 
 ## Tests
 

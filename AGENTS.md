@@ -12,7 +12,16 @@ trading.
 ## Environment and commands
 
 - Package manager: **uv** with **Python 3.11** (the system has 3.14; torch
-  comes from the CPU-only index defined in `pyproject.toml`).
+  comes from an index defined in `pyproject.toml`).
+- **Default: CPU-only torch from PyPI** — the CUDA index block is commented
+  out.
+- `requires-python` is **`>=3.11,<3.12`** (3.11-only on purpose): the NVIDIA
+  `cu124` torch wheelhouse only resolves cleanly for CPython 3.11. Keep the
+  whole project on 3.11.
+- To keep every package at the best available version from all configured
+  indexes (PyPI plus any CUDA wheelhouse), `index-strategy =
+  "unsafe-best-match"` is set under `[tool.uv]`. Only matters while the CUDA
+  index is enabled.
 - Install: `uv sync --python 3.11` (installs `timesfm` + `uni2ts` +
   `chronos-forecasting`; `uni2ts` pins torch <2.5, numpy 1.26 and einops 0.7,
   shared with the other backends; `transformers` is pinned `<5` because v5
@@ -55,13 +64,10 @@ trading.
   `kronos-mini`/`small`/`base` (max_context 2048/512/512) and `chronos2`
   (max_context=2048, max_horizon=1024). TimesFM patches context in windows of
   32, so the lookback slider uses multiples of 32.
-- **Devices**: CPU by default; GPU if a CUDA (NVIDIA) or ROCm/HIP (AMD)
-  torch build is installed. TimesFM/Moirai/Chronos-2 torch inference only
-  accelerates on CUDA/HIP, so the UI offers only cpu/cuda — on a ROCm build the
-  `cuda` entry runs on the AMD GPU and `device_details("cuda")` labels it
-  "AMD GPU (ROCm/HIP)" (via `is_amd_rocm()`/`torch.version.hip`).
-  `available_devices()` also reports xpu/mps (used by Kronos) and
-  `device_details()` knows all names.
+- **Devices**: CPU by default; GPU if a CUDA (NVIDIA) torch build is installed.
+  TimesFM/Moirai/Chronos-2 torch inference only accelerates on CUDA, so the UI
+  offers only cpu/cuda. `available_devices()` also reports xpu/mps (used by
+  Kronos) and `device_details()` knows all names.
 - **Logging**: `logging` INFO messages at startup/model init (`src/models.py`,
   `app.py`) report the torch build and the selected device/model.
 - **Data format**: `src/data.py` normalizes yfinance to
