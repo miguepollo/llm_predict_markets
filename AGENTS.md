@@ -66,10 +66,13 @@ trading.
   32, so the lookback slider uses multiples of 32.
 - **Devices**: CPU by default; GPU if a CUDA (NVIDIA) torch build is installed.
   The UI offers whatever `available_devices()` detects — `cpu`, `cuda`, `xpu`
-  (Intel GPU) and `mps` (Apple Silicon). TimesFM/Moirai/Chronos-2 torch inference
-  only accelerates on CUDA, so `effective_device()` makes them fall back to CPU
-  on `xpu`/`mps`; only Kronos can run on XPU/MPS natively. `device_details()`
-  knows all names.
+  (Intel GPU), `npu` (Intel NPU via OpenVINO) and `mps` (Apple Silicon).
+  TimesFM/Moirai/Chronos-2 torch inference only accelerates on CUDA, so
+  `effective_device()` makes them fall back to CPU on `xpu`/`npu`/`mps`; only
+  Kronos can run on XPU/MPS natively (the NPU has no torch device string, so
+  `_load_kronos` compiles it with `torch.compile(model, backend="openvino")`
+  and still runs on CPU tensors, falling back to CPU if OpenVINO is absent).
+  `device_details()` knows all names.
 - **Logging**: `logging` INFO messages at startup/model init (`src/models.py`,
   `app.py`) report the torch build and the selected device/model.
 - **Data format**: `src/data.py` normalizes yfinance to

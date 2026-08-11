@@ -100,7 +100,7 @@ All parameters are set in the sidebar:
 | Parameter | What it does |
 |---|---|
 | **Foundation model** | `TimesFM-2.5` (point forecast), `Moirai small/base/large` (probabilistic + true multivariate), `Kronos mini/small/base` (generative) or `Chronos-2` (quantile-based, Amazon). Default: `moirai-base`. |
-| **Compute device** | Auto-detected from torch and offered in the sidebar: `cpu`, `cuda` (NVIDIA GPU), `xpu` (Intel GPU) and `mps` (Apple Silicon). TimesFM/Moirai/Chronos-2 only accelerate on `cuda` and fall back to CPU otherwise; **Kronos can also use `xpu`/`mps`**. |
+| **Compute device** | Auto-detected from torch and offered in the sidebar: `cpu`, `cuda` (NVIDIA GPU), `xpu` (Intel GPU), `npu` (Intel NPU via OpenVINO) and `mps` (Apple Silicon). TimesFM/Moirai/Chronos-2 only accelerate on `cuda` and fall back to CPU otherwise; **Kronos can also use `xpu`/`mps`, and the `npu` via OpenVINO**. |
 | **Mode** | `Forecast`: predicts the next N candles into the future. `Backtest`: predicts a known historical window and compares it against reality with metrics (MAE, RMSE, MAPE, directional accuracy) — use this to judge whether the model works for your ticker/timeframe before trusting a forecast. |
 | **Lookback** | Number of past candles fed as context (multiples of 32; up to 1024 for TimesFM, 512 for Moirai, 2048 for Kronos-mini/Chronos-2). More context = more information, but slower. |
 | **Candles to predict / Backtest candles** | Prediction horizon (`pred_len`, max 240): how many candles the model generates. Longer horizons are slower and less reliable. |
@@ -112,11 +112,11 @@ All parameters are set in the sidebar:
 
 The app picks the compute device from the sidebar ("Compute device"). The list
 is auto-detected from torch: `cpu` is always available, plus `cuda` (NVIDIA
-GPU), `xpu` (Intel GPU) and `mps` (Apple Silicon) when the installed torch
-exposes them. Because TimesFM / Moirai / Chronos-2 torch inference only
-accelerates on CUDA, selecting `xpu`/`mps` with those backends falls back to
-CPU; **Kronos is the only backend that can run natively on Intel XPU / Apple
-MPS**.
+GPU), `xpu` (Intel GPU), `npu` (Intel NPU, via OpenVINO) and `mps` (Apple
+Silicon) when the installed runtime exposes them. Because TimesFM / Moirai /
+Chronos-2 torch inference only accelerates on CUDA, selecting `xpu`/`npu`/`mps`
+with those backends falls back to CPU; **Kronos is the only backend that can run
+natively on Intel XPU / Apple MPS, and on the Intel NPU through OpenVINO**.
 
 By default `pyproject.toml` uses a **CPU-only torch** build from PyPI; the CUDA
 index in that file is commented out, so no GPU support is installed.
@@ -207,16 +207,27 @@ this app (TimesFM / Moirai / Chronos-2 fall back to CPU on it). To enable it:
 Please note that CPU-only / CUDA torch builds have no XPU support, and Intel
 Arc / Iris Xe / Core Ultra iGPUs have the best XPU coverage.
 
-### Intel NPU (AI Boost, Core Ultra) — not plug-and-play
+### Intel NPU (AI Boost, Core Ultra) — via OpenVINO
 
 PyTorch has **no native NPU backend**; Intel NPUs are reached through
-**OpenVINO**. Kronos is a custom autoregressive model (a Python sampling loop
-with dynamic shapes), so it does not run on the NPU out of the box. A real
-setup would require exporting the Kronos tokenizer and transformer to OpenVINO
-IR (via `optimum-intel` / `ovc`), or wrapping single-step forwards with
-`torch.compile(model, backend="openvino")`. This is experimental and not wired
-into this app. For faster inference today, use an Intel GPU via XPU (above) or
-an NVIDIA GPU via CUDA.
+**OpenVINO**. This app exposes the NPU as an `npu` device in the sidebar and
+runs **Kronos** on it (the only backend with an NPU path; TimesFM / Moirai /
+Chronos-2 fall back to CPU). Kronos is a custom autoregressive model, so we
+compile it with OpenVINO's torch backend rather than exporting to IR:
+
+```bash
+uv pip install openvino
+uv run streamlit run app.py   # then pick `npu` in the sidebar (Kronos model)
+```
+
+When `npu` is selected, `_load_kronos` runs
+`torch.compile(model, backend="openvino")`; the NPU has no `torch.device`
+string, so the compiled module still runs on CPU tensors while OpenVINO
+offloads operators to the NPU. If OpenVINO's torch backend is unavailable the
+app logs a warning and falls back to CPU. This is the experimental path;
+**Kronos is dynamic-shape and NPU support varies by model/size**. For the most
+reliable Intel acceleration today, use the GPU via XPU (above) or an NVIDIA GPU
+via CUDA.
 
 ## Tests
 

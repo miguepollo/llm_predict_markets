@@ -108,8 +108,9 @@ with st.sidebar:
         "Compute device", devices, index=0,
         format_func=device_details,
         help="TimesFM/Moirai/Chronos-2 accelerate on a CUDA (NVIDIA) GPU; "
-             "XPU (Intel GPU)/MPS fall back to CPU for them, but Kronos can "
-             "use XPU natively. If unsure, use cpu.",
+             "XPU (Intel GPU)/NPU (OpenVINO)/MPS fall back to CPU for them, "
+             "but Kronos can use XPU/MPS natively (NPU via OpenVINO). "
+             "If unsure, use cpu.",
     )
 
     mode = st.radio("Mode", ["Forecast", "Backtest"], horizontal=True)

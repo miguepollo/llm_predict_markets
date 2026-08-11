@@ -1,4 +1,4 @@
-"""Unit tests for compute-device detection and labelling (CPU / CUDA / XPU / MPS).
+"""Unit tests for compute-device detection and labelling (CPU / CUDA / XPU / NPU / MPS).
 
 These tests are hermetic: they inject a *fake* torch module into ``sys.modules``
 so they run without a real torch install or GPU.
@@ -64,3 +64,45 @@ def test_effective_device_keeps_xpu_mps_for_kronos():
     m, _ = _load_models(device_name="NVIDIA GeForce RTX 3060")
     assert m.effective_device("kronos", "xpu") == "xpu"
     assert m.effective_device("kronos", "mps") == "mps"
+
+
+# ---------------------------------------------------------------- Intel NPU ---
+
+
+def test_device_details_npu_without_openvino():
+    # openvino is not installed in the test environment: the label still works.
+    m, _ = _load_models(device_name="irrelevant")
+    assert m.device_details("npu") == "Intel NPU (OpenVINO)"
+
+
+def test_available_devices_lists_npu_when_openvino_present():
+    m, _ = _load_models(device_name="NVIDIA GeForce RTX 3060")
+    m._openvino_npu_available = lambda: True
+    devices = m.available_devices()
+    assert "npu" in devices
+
+
+def test_available_devices_omits_npu_when_openvino_absent():
+    m, _ = _load_models(device_name="NVIDIA GeForce RTX 3060")
+    m._openvino_npu_available = lambda: False
+    devices = m.available_devices()
+    assert "npu" not in devices
+
+
+def test_effective_device_falls_back_to_cpu_for_non_kronos_on_npu():
+    m, _ = _load_models(device_name="NVIDIA GeForce RTX 3060")
+    for backend in ("timesfm", "moirai", "chronos2"):
+        assert m.effective_device(backend, "npu") == "cpu"
+
+
+def test_effective_device_keeps_npu_for_kronos():
+    m, _ = _load_models(device_name="NVIDIA GeForce RTX 3060")
+    assert m.effective_device("kronos", "npu") == "npu"
+
+
+def test_compile_kronos_for_npu_falls_back_to_original_model():
+    # Without an OpenVINO torch backend, the NPU compile degrades to the
+    # original (CPU) model instead of raising.
+    m, _ = _load_models(device_name="irrelevant")
+    sentinel = object()
+    assert m._compile_kronos_for_npu(sentinel) is sentinel

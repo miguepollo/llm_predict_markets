@@ -175,11 +175,45 @@ def device_details(device: str) -> str:
                 )
             except Exception:
                 return "Intel GPU (XPU)"
+        if device == "npu":
+            try:
+                from openvino import Core
+
+                core = Core()
+                name = next(
+                    (
+                        core.get_property(d, "FULL_DEVICE_NAME")
+                        for d in core.available_devices
+                        if d == "NPU"
+                    ),
+                    None,
+                )
+                if name:
+                    return f"Intel NPU (OpenVINO): {name}"
+                return "Intel NPU (OpenVINO)"
+            except Exception:
+                return "Intel NPU (OpenVINO)"
         if device == "mps":
             return "Apple Silicon GPU (MPS)"
     except Exception:
         pass
     return device
+
+
+def _openvino_npu_available() -> bool:
+    """True when the Intel NPU is reachable through OpenVINO.
+
+    Intel NPUs (AI Boost on Core Ultra) have no native PyTorch ``torch.device``;
+    they are reached through the OpenVINO runtime (``openvino`` package). We ask
+    OpenVINO ``Core`` for its available devices and look for an ``NPU`` device.
+    """
+    try:
+        from openvino import Core
+
+        core = Core()
+        return "NPU" in core.available_devices
+    except Exception:
+        return False
 
 
 def available_devices() -> list[str]:
@@ -190,11 +224,14 @@ def available_devices() -> list[str]:
     - ``xpu``: Intel GPU (Arc / Iris Xe) via torch XPU backend. On Linux
       requires a torch XPU build (download.pytorch.org/whl/xpu) and,
       depending on the GPU, intel-extension-for-pytorch.
+    - ``npu``: Intel NPU (AI Boost on Core Ultra) via OpenVINO. Requires the
+      ``openvino`` package and the Intel NPU driver; no native torch device.
     - ``mps``: Apple Silicon.
 
     Note: TimesFM / Moirai / Chronos-2 torch inference only accelerates on a
-    CUDA GPU and falls back to CPU otherwise; Kronos can additionally use XPU
-    or MPS when present (see :func:`effective_device`). The UI offers whatever
+    CUDA GPU and falls back to CPU otherwise; Kronos can additionally use XPU,
+    MPS or the NPU when present (see :func:`effective_device`, and
+    :func:`_compile_kronos_for_npu` for the NPU path). The UI offers whatever
     this function detects.
     """
     devices = ["cpu"]
@@ -205,6 +242,8 @@ def available_devices() -> list[str]:
             devices.append("cuda")
         if hasattr(torch, "xpu") and torch.xpu.is_available():
             devices.append("xpu")
+        if _openvino_npu_available():
+            devices.append("npu")
         if torch.backends.mps.is_available():
             devices.append("mps")
     except Exception:
@@ -520,6 +559,30 @@ def _load_moirai(cfg: ModelConfig, device: str):
     )
 
 
+def _compile_kronos_for_npu(model):
+    """Compiles a Kronos model for the Intel NPU via OpenVINO's torch backend.
+
+    The Intel NPU has no ``torch.device`` string, so the compiled module still
+    runs on CPU tensors while OpenVINO offloads the operators to the NPU. This
+    is the experimental path documented in the README; if OpenVINO's torch
+    backend is missing it falls back to the original CPU model.
+    """
+    try:
+        import torch
+
+        backend = getattr(torch.backends, "openvino", None)
+        if backend is None or not getattr(backend, "is_available", lambda: False)():
+            raise RuntimeError("OpenVINO torch backend not available")
+        compiled = torch.compile(model, backend="openvino")
+        logger.info("Kronos compiled for the Intel NPU via OpenVINO.")
+        return compiled
+    except Exception as e:  # noqa: BLE001 - degrade gracefully to CPU
+        logger.warning(
+            "Intel NPU (OpenVINO) compile failed (%s); falling back to CPU.", e
+        )
+        return model
+
+
 def _load_kronos(cfg: ModelConfig, device: str):
     _ensure_kronos_importable()
     from model import (  # noqa: PLC0415
@@ -530,6 +593,14 @@ def _load_kronos(cfg: ModelConfig, device: str):
 
     tokenizer = KronosTokenizer.from_pretrained(cfg.hf_tokenizer_id)
     model = Kronos.from_pretrained(cfg.hf_model_id)
+
+    # The Intel NPU has no torch device string; OpenVINO compiles the model but
+    # it still runs on CPU tensors, so the vendored predictor (which calls
+    # ``model.to(device)``) must be handed ``cpu``.
+    if device == "npu":
+        model = _compile_kronos_for_npu(model)
+        device = "cpu"
+
     predictor = _VendoredKronosPredictor(
         model,
         tokenizer,
@@ -549,18 +620,19 @@ def _load_chronos2(cfg: ModelConfig, device: str):
 
 
 # Devices that only Kronos can consume natively. The torch-based backends
-# (TimesFM / Moirai / Chronos-2) have no accelerated path on an Intel XPU or
-# Apple MPS device, so they must fall back to CPU (Kronos runs on those).
-_KRONOS_ONLY_DEVICES = frozenset({"xpu", "mps"})
+# (TimesFM / Moirai / Chronos-2) have no accelerated path on an Intel XPU, an
+# Intel NPU or an Apple MPS device, so they must fall back to CPU. Kronos runs
+# on XPU/MPS; on the NPU it runs through OpenVINO (see _load_kronos).
+_KRONOS_ONLY_DEVICES = frozenset({"xpu", "npu", "mps"})
 
 
 def effective_device(backend: str, device: str) -> str:
     """Returns the device a backend should actually run on.
 
-    ``xpu`` (Intel GPU) / ``mps`` (Apple Silicon) only have a working path in
-    Kronos; TimesFM, Moirai and Chronos-2 fall back to ``cpu`` on them (their
-    torch inference only accelerates on CUDA). ``cpu`` and ``cuda`` always pass
-    through unchanged.
+    ``xpu`` (Intel GPU), ``npu`` (Intel NPU, OpenVINO) and ``mps`` (Apple
+    Silicon) only have a working path in Kronos; TimesFM, Moirai and Chronos-2
+    fall back to ``cpu`` on them (their torch inference only accelerates on
+    CUDA). ``cpu`` and ``cuda`` always pass through unchanged.
     """
     if backend != "kronos" and device in _KRONOS_ONLY_DEVICES:
         return "cpu"
